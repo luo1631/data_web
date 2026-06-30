@@ -93,7 +93,7 @@ class DatabasePipeline:
     async def finish_crawl_batch(
         self, batch_id: int, status: str = "completed"
     ) -> None:
-        """标记批次完成。"""
+        """标记批次完成，并触发 WAL checkpoint 回收空间。"""
         async with self._write_lock:
             stmt = (
                 update(CrawlBatch)
@@ -102,6 +102,10 @@ class DatabasePipeline:
             )
             await self._write_session.execute(stmt)
             await self._write_session.commit()
+            # 批量写入后截断 WAL 文件，防止无限增长
+            await self._write_session.execute(
+                text("PRAGMA wal_checkpoint(TRUNCATE)")
+            )
 
     # ── CrawlTask ────────────────────────────────────
 
@@ -423,7 +427,7 @@ def _build_listing_values(
     batch_id: int,
     source_url: str,
 ) -> dict:
-    """将清洁数据构建为 Listing 构造参数。"""
+    """将清洁数据构建为 Listing 构造参数。包含 status='active' 确保重新上架。"""
     return {
         "district_id": district_id,
         "community_id": community_id,
@@ -445,11 +449,12 @@ def _build_listing_values(
         "has_elevator": data.get("has_elevator"),
         "listing_date": data.get("listing_date"),
         "listing_age_days": data.get("listing_age_days"),
+        "status": "active",                     # 使用该字段表示重新上架/持续活跃
         "md5_hash": md5_hash,
         "crawl_batch_id": batch_id,
     }
 
 
 def func_now():
-    """获取当前 UTC 时间，用于 SQLAlchemy 的 server_default 替代。"""
+    """获取当前时间。"""
     return datetime.now()

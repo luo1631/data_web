@@ -169,7 +169,7 @@ class Fetcher:
         if elapsed < target_delay:
             await asyncio.sleep(target_delay - elapsed)
 
-        self._last_request[group] = asyncio.get_event_loop().time()
+        self._last_request[group] = asyncio.get_running_loop().time()
 
     async def _fetch(self, url: str, referer_step: str) -> str:
         """带重试的 HTTP GET 请求。"""

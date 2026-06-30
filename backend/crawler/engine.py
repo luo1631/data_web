@@ -124,17 +124,20 @@ class CrawlEngine:
             ]
             await asyncio.gather(*tasks, return_exceptions=True)
 
-            # 统计已完成的任务数
-            completed = sum(1 for t in tasks if not t.exception())
+            # 统计：区分正常完成与异常
+            failed = sum(1 for t in tasks if isinstance(t, BaseException))
+            completed = len(tasks) - failed
+            final_status = "completed" if failed == 0 else "completed_with_errors"
+            import json
             await pipeline.update_crawl_batch(
                 batch_id,
                 completed_tasks=completed,
                 new_listings=self._new_count,
                 updated_listings=self._updated_count,
                 removed_listings=self._removed_count,
-                error_summary=str(self._errors[:100]),
+                error_summary=json.dumps(self._errors[:100], ensure_ascii=False, default=str),
             )
-            await pipeline.finish_crawl_batch(batch_id, "completed")
+            await pipeline.finish_crawl_batch(batch_id, final_status)
 
         self._running = False
         return {

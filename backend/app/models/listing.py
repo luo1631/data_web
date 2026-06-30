@@ -10,10 +10,10 @@ class Listing(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     external_id: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    district_id: Mapped[int | None] = mapped_column(ForeignKey("districts.id"))
-    community_id: Mapped[int | None] = mapped_column(ForeignKey("communities.id"))
+    district_id: Mapped[int | None] = mapped_column(ForeignKey("districts.id", ondelete="SET NULL"))
+    community_id: Mapped[int | None] = mapped_column(ForeignKey("communities.id", ondelete="SET NULL"))
     title: Mapped[str | None] = mapped_column(String(500))
-    source_platform: Mapped[str] = mapped_column(String(100), default="fang.com")
+    source_platform: Mapped[str] = mapped_column(String(100), default="fang.com", nullable=False)
     source_url: Mapped[str | None] = mapped_column(String(1000))
 
     total_price: Mapped[float | None] = mapped_column(Numeric(12, 2))
@@ -33,18 +33,16 @@ class Listing(Base):
     listing_date: Mapped[date | None] = mapped_column(Date)
     listing_age_days: Mapped[int | None] = mapped_column(Integer)
 
-    status: Mapped[str] = mapped_column(String(20), default="active")
+    status: Mapped[str] = mapped_column(String(20), default="active", nullable=False)
     status_change_date: Mapped[date | None] = mapped_column(Date)
 
     md5_hash: Mapped[str | None] = mapped_column(String(32))
-    crawl_batch_id: Mapped[int | None] = mapped_column(Integer)
+    crawl_batch_id: Mapped[int | None] = mapped_column(ForeignKey("crawl_batches.id", ondelete="SET NULL"))
     first_seen_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
     last_seen_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
     last_updated_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
 
-    # 复合索引（覆盖 99% 查询场景，低区分度字段不建单列索引）
     __table_args__ = (
-        Index("idx_listings_status", "status"),
         Index("idx_listings_district_status", "district_id", "status"),
         Index("idx_listings_community_status", "community_id", "status"),
         Index("idx_listings_unit_price", "unit_price"),
