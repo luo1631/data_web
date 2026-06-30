@@ -61,6 +61,18 @@ class Fetcher:
                 "Accept-Encoding": "gzip, deflate, br",
             },
         )
+        # 先访问首页播种 Cookie（模拟真实用户行为）
+        try:
+            resp = await self._client.get(BASE_URL + "/", headers={
+                "User-Agent": random.choice(USER_AGENTS),
+            })
+            if resp.status_code < 400:
+                cookies = dict(self._client.cookies)
+                if cookies:
+                    import logging
+                    logging.getLogger(__name__).debug(f"Seeded {len(cookies)} cookies")
+        except Exception:
+            pass  # 播种失败不阻塞爬取
         return self
 
     async def __aexit__(self, *args) -> None:
@@ -118,10 +130,8 @@ class Fetcher:
     # ── internal ─────────────────────────────────────
 
     def _rotate_ua(self) -> str:
-        """轮换 User-Agent，循环使用 UA 池。"""
-        ua = USER_AGENTS[self._ua_idx % len(USER_AGENTS)]
-        self._ua_idx += 1
-        return ua
+        """随机选择 User-Agent（非确定性轮换，防指纹）。"""
+        return random.choice(USER_AGENTS)
 
     def _build_headers(self, referer_step: str) -> dict[str, str]:
         """构建请求头，含 UA 和 Referer 链。

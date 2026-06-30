@@ -1,5 +1,5 @@
 from datetime import date
-from sqlalchemy import String, Integer, SmallInteger, Numeric, Date, DateTime, Boolean, ForeignKey, func
+from sqlalchemy import String, Integer, SmallInteger, Numeric, Date, DateTime, Boolean, ForeignKey, func, Index
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -41,3 +41,13 @@ class Listing(Base):
     first_seen_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
     last_seen_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
     last_updated_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
+
+    # 复合索引（覆盖 99% 查询场景，低区分度字段不建单列索引）
+    __table_args__ = (
+        Index("idx_listings_status", "status"),
+        Index("idx_listings_district_status", "district_id", "status"),
+        Index("idx_listings_community_status", "community_id", "status"),
+        Index("idx_listings_unit_price", "unit_price"),
+        Index("idx_listings_last_updated", "last_updated_at"),
+        Index("idx_listings_listing_date", "listing_date"),
+    )

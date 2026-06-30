@@ -8,8 +8,7 @@
 """
 
 import logging
-from datetime import datetime, timedelta, date
-from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 from sqlalchemy import select, desc, update
 
@@ -100,28 +99,21 @@ async def run_weekly_incremental_crawl():
 async def run_daily_listing_age_update():
     """每日更新所有活跃房源的 listing_age_days 字段。
 
-    每天凌晨 3:00 执行，不需要爬取数据，纯计算字段更新。
+    每天凌晨 3:00 执行，使用单次 SQL 批量更新（避免 N+1）。
     """
     logger.info("[Scheduler] listing_age_days 每日更新触发")
     async with async_session() as db:
+        # 单次批量 UPDATE: listing_age_days = julianday('now') - julianday(listing_date)
+        from sqlalchemy import text
         result = await db.execute(
-            select(Listing.id, Listing.listing_date).where(
-                Listing.status == "active",
-                Listing.listing_date.isnot(None),
-            )
+            text("""
+                UPDATE listings
+                SET listing_age_days = CAST(julianday('now') - julianday(listing_date) AS INTEGER)
+                WHERE status = 'active' AND listing_date IS NOT NULL
+            """)
         )
-        updated = 0
-        today = date.today()
-        for lid, ld in result.all():
-            if ld:
-                age = (today - ld).days
-                await db.execute(
-                    update(Listing).where(Listing.id == lid).values(listing_age_days=age)
-                )
-                updated += 1
-
         await db.commit()
-        logger.info(f"[Scheduler] listing_age_days 刷新完成: {updated} 条")
+        logger.info(f"[Scheduler] listing_age_days 刷新完成: {result.rowcount} 条")
 
 
 async def resume_incomplete_batches():

@@ -58,6 +58,7 @@ class CrawlEngine:
         self._updated_count = 0
         self._unchanged_count = 0
         self._error_count = 0
+        self._removed_count = 0
         self._errors: list[dict] = []
 
     # ── public API ───────────────────────────────────
@@ -87,6 +88,7 @@ class CrawlEngine:
         self._updated_count = 0
         self._unchanged_count = 0
         self._error_count = 0
+        self._removed_count = 0
         self._errors: list[dict] = []
 
         async with Fetcher() as fetcher, DatabasePipeline(
@@ -122,20 +124,24 @@ class CrawlEngine:
             ]
             await asyncio.gather(*tasks, return_exceptions=True)
 
-            # 先写统计，再标完成
+            # 统计已完成的任务数
+            completed = sum(1 for t in tasks if not t.exception())
             await pipeline.update_crawl_batch(
                 batch_id,
+                completed_tasks=completed,
                 new_listings=self._new_count,
                 updated_listings=self._updated_count,
-                removed_listings=0,
+                removed_listings=self._removed_count,
                 error_summary=str(self._errors[:100]),
             )
             await pipeline.finish_crawl_batch(batch_id, "completed")
 
+        self._running = False
         return {
             "new": self._new_count,
             "updated": self._updated_count,
             "unchanged": self._unchanged_count,
+            "removed": self._removed_count,
             "errors": self._error_count,
         }
 
@@ -151,14 +157,20 @@ class CrawlEngine:
     ) -> None:
         """爬取单个区县的所有房源。
 
-        1. 遍历列表页 1..N，收集所有房源 ID
-        2. 并发爬取每个房源的详情页
+        1. 如果该 batch+district 已有完成的 CrawlTask → 跳过（真断点续爬）
+        2. 遍历列表页 1..N，收集所有房源 ID
+        3. 并发爬取每个房源的详情页
+        4. 检测已下架房源
         """
         if not self._running:
             return
 
-        # 创建区县任务记录
-        task_id = await pipeline.create_crawl_task(batch_id, db_id)
+        # 断点续爬：已完成则跳过
+        task_id = await pipeline.get_or_create_crawl_task(batch_id, db_id)
+        if task_id is None:
+            # 已有完成的 task → 跳过
+            print(f"[SKIP] {name}: already completed in batch #{batch_id}")
+            return
 
         try:
             # ── Phase 1: 收集房源 ID ──
@@ -208,8 +220,14 @@ class CrawlEngine:
                 ]
                 await asyncio.gather(*detail_tasks, return_exceptions=True)
 
+            # ── Phase 3: 检测下架房源 ──
+            # 本区县中，在库且 active 但本次未出现的 = 已下架
+            if all_ids:
+                removed = await pipeline.mark_removed_listings(db_id, all_ids)
+                self._removed_count += removed
+
             await pipeline.finish_crawl_task(task_id, "completed")
-            print(f"[OK] {name}: {len(all_ids)} listings processed")
+            print(f"[OK] {name}: {len(all_ids)} listings processed, {self._removed_count} removed")
 
         except Exception as e:
             await pipeline.finish_crawl_task(

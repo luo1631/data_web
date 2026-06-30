@@ -1,13 +1,52 @@
 """
 描述性统计分析模块：均价、中位数、分布、区县排名、户型/装修/面积/房龄分布。
+
+含简单 TTL 内存缓存（60s），避免高频请求重复聚合计算。
 """
 
 import statistics
-from dataclasses import dataclass, field
+import time
 from typing import Sequence
 
 from sqlalchemy import func, select, and_, case
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# ── 简易 TTL 缓存（无外部依赖）──
+_OVERVIEW_CACHE: dict[str, tuple[float, dict]] = {}
+_COMPARE_CACHE: list = [0, []]  # [timestamp, data] 可变列表引用
+_CACHE_TTL = 60  # 秒
+
+
+async def get_overview_stats(
+    db: AsyncSession, district_id: int | None = None
+) -> dict:
+    """全量概览统计（60s TTL 缓存）。"""
+    cache_key = f"overview_{district_id}"
+    now = time.time()
+    cached = _OVERVIEW_CACHE.get(cache_key)
+    if cached and (now - cached[0]) < _CACHE_TTL:
+        return cached[1]
+
+    result = await _compute_overview_stats(db, district_id)
+    _OVERVIEW_CACHE[cache_key] = (now, result)
+    # 清理过期条目
+    _OVERVIEW_CACHE.clear() if len(_OVERVIEW_CACHE) > 50 else None
+    return result
+
+
+async def get_district_compare(db: AsyncSession) -> list[dict]:
+    """区县对比分析（60s TTL 缓存）。"""
+    now = time.time()
+    if _COMPARE_CACHE[0] and (now - _COMPARE_CACHE[0]) < _CACHE_TTL:
+        return _COMPARE_CACHE[1]
+
+    result = await _compute_district_compare(db)
+    _COMPARE_CACHE[0] = now
+    _COMPARE_CACHE[1] = result
+    return result
+
+
+# ── 内部实现（无缓存）──
 
 from app.models.listing import Listing
 from app.models.district import District
@@ -42,18 +81,10 @@ AGE_BINS = [
 ]
 
 
-async def get_overview_stats(
+async def _compute_overview_stats(
     db: AsyncSession, district_id: int | None = None
 ) -> dict:
-    """全量概览统计。
-
-    Returns:
-        {total, avg_total_price, median_total_price, avg_unit_price,
-         median_unit_price, avg_area, price_std, unit_price_std,
-         district_ranking: [{name, count, avg_price}],
-         price_distribution, area_distribution, age_distribution,
-         layout_distribution, decoration_distribution, orientation_distribution}
-    """
+    """全量概览统计（内部实现，无缓存）。"""
     base = [Listing.status == "active"]
     if district_id is not None:
         base.append(Listing.district_id == district_id)
@@ -137,8 +168,8 @@ async def get_overview_stats(
     }
 
 
-async def get_district_compare(db: AsyncSession) -> list[dict]:
-    """区县对比分析 — 每个区县的均价、中位数、标准差、房源数。"""
+async def _compute_district_compare(db: AsyncSession) -> list[dict]:
+    """区县对比分析 — 每个区县的均价、中位数、标准差、房源数。（内部实现）"""
     rows = await db.execute(
         select(
             District.name,

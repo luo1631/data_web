@@ -219,24 +219,36 @@ async def get_listing_summary(
     median_total = statistics.median(total_prices) if total_prices else None
     median_unit = statistics.median(unit_prices) if unit_prices else None
 
-    # 价格段分布
-    bins = []
+    # 价格段分布（单次 CASE WHEN 查询，替代 6 次独立 COUNT）
+    from sqlalchemy import case
+    bin_whens = []
+    bin_labels = []
     for lo, hi, label in PRICE_BINS:
-        conds = list(base_cond)
+        sub_conds = []
         if lo is not None:
-            conds.append(Listing.total_price >= lo)
+            sub_conds.append(Listing.total_price >= lo)
         if hi is not None:
-            conds.append(Listing.total_price < hi)
+            sub_conds.append(Listing.total_price < hi)
+        bin_whens.append(and_(*sub_conds))
+        bin_labels.append(label)
 
-        b_result = await db.execute(
-            select(func.count(Listing.id)).where(and_(*conds))
-        )
-        cnt = b_result.scalar() or 0
-        bins.append(PriceRangeInfo(
+    bin_selects = [
+        func.sum(case((w, 1), else_=0)).label(f"b{i}")
+        for i, w in enumerate(bin_whens)
+    ]
+    bin_result = await db.execute(
+        select(*bin_selects).where(and_(*base_cond))
+    )
+    bin_counts = bin_result.one()
+
+    bins = [
+        PriceRangeInfo(
             range_label=label,
-            count=cnt,
-            pct=round(cnt / total * 100, 1) if total > 0 else 0.0,
-        ))
+            count=bin_counts[i] or 0,
+            pct=round((bin_counts[i] or 0) / total * 100, 1) if total > 0 else 0.0,
+        )
+        for i, label in enumerate(bin_labels)
+    ]
 
     return ListingSummary(
         total_listings=total,

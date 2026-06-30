@@ -36,6 +36,8 @@ MD5_FIELDS = [
     "building_structure",
     "has_elevator",
     "community_name",
+    "title",           # 标题变更也视为内容更新
+    "listing_date",    # 挂牌日期变更（重新上架等）
 ]
 
 

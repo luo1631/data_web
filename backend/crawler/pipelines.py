@@ -105,10 +105,54 @@ class DatabasePipeline:
 
     # ── CrawlTask ────────────────────────────────────
 
+    async def get_or_create_crawl_task(
+        self, batch_id: int, district_id: int
+    ) -> int | None:
+        """获取或创建区县爬取任务。已完成则返回 None（真断点续爬）。
+
+        先查是否已有完成的 task 对于该 (batch_id, district_id)。
+        有 → 跳过，返回 None
+        有但未完成 → 返回已有 task_id（复用）
+        无 → 创建新 task，返回 task_id
+        """
+        result = await self._write_session.execute(
+            select(CrawlTask).where(
+                CrawlTask.batch_id == batch_id,
+                CrawlTask.district_id == district_id,
+            )
+        )
+        existing = result.scalar_one_or_none()
+
+        if existing is not None:
+            if existing.status == "completed":
+                return None  # 已完成，跳过
+            # 未完成 → 复用现有 task
+            async with self._write_lock:
+                await self._write_session.execute(
+                    update(CrawlTask)
+                    .where(CrawlTask.id == existing.id)
+                    .values(status="running", started_at=datetime.now())
+                )
+                await self._write_session.commit()
+            return existing.id
+
+        # 创建新 task
+        task = CrawlTask(
+            batch_id=batch_id,
+            district_id=district_id,
+            status="running",
+            started_at=datetime.now(),
+        )
+        async with self._write_lock:
+            self._write_session.add(task)
+            await self._write_session.commit()
+            await self._write_session.refresh(task)
+            return task.id
+
     async def create_crawl_task(
         self, batch_id: int, district_id: int
     ) -> int:
-        """为区县创建爬取任务记录。"""
+        """为区县创建爬取任务记录（始终创建新任务）。"""
         task = CrawlTask(
             batch_id=batch_id,
             district_id=district_id,
@@ -302,6 +346,49 @@ class DatabasePipeline:
             )
             cid = result.scalar_one()
             return cid
+
+    # ── Remove detection ──────────────────────────
+
+    async def mark_removed_listings(
+        self, district_id: int, seen_ids: list[str]
+    ) -> int:
+        """标记本区县已下架的房源。
+
+        查询本区县 active 房源中不在 seen_ids 里的，
+        将其 status 改为 "removed"，记录 status_change_date。
+
+        Returns: 被标记下架的房源数
+        """
+        if not seen_ids:
+            return 0
+
+        today = date.today()
+        async with self._write_lock:
+            # 找到区县中活跃但本次未出现的房源
+            result = await self._write_session.execute(
+                select(Listing.external_id).where(
+                    Listing.district_id == district_id,
+                    Listing.status == "active",
+                )
+            )
+            active_in_db = {row[0] for row in result.all()}
+            removed_ids = active_in_db - set(seen_ids)
+
+            if not removed_ids:
+                return 0
+
+            # 批量标记为 removed
+            stmt = (
+                update(Listing)
+                .where(
+                    Listing.external_id.in_(removed_ids),
+                    Listing.district_id == district_id,
+                )
+                .values(status="removed", status_change_date=today)
+            )
+            await self._write_session.execute(stmt)
+            await self._write_session.commit()
+            return len(removed_ids)
 
     # ── Read helpers (no lock) ───────────────────────
 
