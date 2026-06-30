@@ -1,4 +1,4 @@
-from sqlalchemy import String, SmallInteger, Boolean, DateTime, func
+from sqlalchemy import String, Integer, Boolean, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -10,6 +10,6 @@ class District(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(50), nullable=False)
     pinyin: Mapped[str | None] = mapped_column(String(100))
-    level: Mapped[int] = mapped_column(SmallInteger, default=1)
+    level: Mapped[int] = mapped_column(Integer, default=1)
     is_urban: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())

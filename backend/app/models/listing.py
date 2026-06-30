@@ -40,4 +40,4 @@ class Listing(Base):
     crawl_batch_id: Mapped[int | None] = mapped_column(Integer)
     first_seen_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
     last_seen_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
-    last_updated_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    last_updated_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())

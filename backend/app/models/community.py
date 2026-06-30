@@ -22,4 +22,4 @@ class Community(Base):
     lng: Mapped[float | None] = mapped_column(Numeric(10, 7))
     lat: Mapped[float | None] = mapped_column(Numeric(10, 7))
     created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
-    updated_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())

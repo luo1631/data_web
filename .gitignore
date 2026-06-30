@@ -10,8 +10,11 @@ venv/
 node_modules/
 frontend/dist/
 
-# Docker
-.env
+# Env (contains secrets)
+*.env
+
+# SQLite database file
+*.db
 
 # IDE
 .idea/

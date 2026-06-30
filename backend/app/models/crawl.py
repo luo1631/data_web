@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Integer, Text, DateTime, ForeignKey, JSON, func
+from sqlalchemy import String, Integer, Text, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -18,7 +18,7 @@ class CrawlBatch(Base):
     new_listings: Mapped[int] = mapped_column(Integer, default=0)
     updated_listings: Mapped[int] = mapped_column(Integer, default=0)
     removed_listings: Mapped[int] = mapped_column(Integer, default=0)
-    error_summary: Mapped[dict | None] = mapped_column(JSON)
+    error_summary: Mapped[str | None] = mapped_column(Text)  # JSON 字符串，SQLite 无原生 JSON
 
 
 class CrawlTask(Base):
