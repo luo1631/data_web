@@ -52,14 +52,22 @@ data_web/
 │   │   │   └── crawl.py         #   爬取批次/任务
 │   │   ├── schemas/             # Pydantic 请求/响应
 │   │   │   ├── common.py        #   APIResponse / PaginatedResponse
-│   │   │   └── district.py      #   District 相关
+│   │   │   ├── district.py      #   District 相关
+│   │   │   ├── listing.py       #   Listing 相关（7 个 Schema）
+│   │   │   ├── community.py     #   Community 相关
+│   │   │   └── crawl.py         #   爬取控制相关
 │   │   ├── api/                 # 路由
 │   │   │   ├── deps.py          #   DB session 依赖注入
 │   │   │   └── v1/
 │   │   │       ├── router.py    #     路由聚合
 │   │   │       ├── health.py    #     GET /api/v1/health
-│   │   │       └── districts.py #     GET /api/v1/districts
-│   │   ├── services/            # 业务逻辑层（Phase 3）
+│   │   │       ├── districts.py #     GET /api/v1/districts, /districts/{id}/stats
+│   │   │       ├── listings.py  #     GET /api/v1/listings, /listings/{id}, /stats/summary
+│   │   │       ├── communities.py#    GET /api/v1/communities, /communities/{id}
+│   │   │       └── crawl.py     #     POST /crawl/start, GET /status/{id}, SSE stream
+│   │   ├── services/            # 业务逻辑层
+│   │   │   ├── listing_service.py#   房源查询/统计
+│   │   │   └── crawl_service.py  #   爬虫启停/SSE
 │   │   └── utils/               # 工具
 │   │       └── response.py      #   统一响应格式
 │   │
@@ -89,7 +97,10 @@ data_web/
         ├── App.tsx              # 路由配置
         ├── index.css            # Tailwind + CSS 变量（亮/暗主题）
         ├── api/
-        │   └── client.ts        # Axios 实例
+        │   ├── client.ts        # Axios 实例
+        │   ├── listings.ts      #   房源 API
+        │   ├── districts.ts     #   区县 API
+        │   └── crawl.ts         #   爬取 API + SSE
         ├── types/
         │   └── common.ts        # TS 类型定义
         ├── stores/
@@ -114,7 +125,7 @@ data_web/
 |-------|------|------|
 | Phase 1 | 项目骨架：FastAPI + React + SQLite + 数据模型 | ✅ 完成 |
 | Phase 2 | 爬虫开发：fang.com 解析 + 字体解密 + 并发调度 | ✅ 完成 |
-| Phase 3 | 后端 API：房源 CRUD + 筛选排序 + 爬取控制 + SSE | ⏳ |
+| Phase 3 | 后端 API：房源 CRUD + 筛选排序 + 爬取控制 + SSE | ✅ 完成 |
 | Phase 4 | 前端页面：三个主界面 + UI 组件 + 图表 + i18n | ⏳ |
 | Phase 5 | 数据分析：统计 + 因素分析 + 聚类 + 趋势 | ⏳ |
 | Phase 6 | 增量更新：APScheduler 定时任务 + 价格历史 | ⏳ |
