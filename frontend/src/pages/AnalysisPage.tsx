@@ -5,6 +5,7 @@ import BarChart from "../components/charts/BarChart";
 import PieChart from "../components/charts/PieChart";
 import LineChart from "../components/charts/LineChart";
 import ScatterChart from "../components/charts/ScatterChart";
+import MapChart from "../components/charts/MapChart";
 import { useThemeStore } from "../stores/useThemeStore";
 import { useDistricts } from "../hooks/useAnalytics";
 import {
@@ -13,9 +14,10 @@ import {
   type OverviewStats, type DistrictCompareItem, type FeatureImportance,
   type ClusterResult, type PriceTrends,
 } from "../api/analytics";
+import { fetchMapPrices, type MapPriceItem } from "../api/analytics";
 import { t } from "../i18n";
 
-type Tab = "overview" | "districts" | "factors" | "clusters" | "trends";
+type Tab = "overview" | "map" | "districts" | "factors" | "clusters" | "trends";
 
 export default function AnalysisPage() {
   const { lang } = useThemeStore();
@@ -28,6 +30,7 @@ export default function AnalysisPage() {
   const [importance, setImportance] = useState<FeatureImportance | null>(null);
   const [cluster, setCluster] = useState<ClusterResult | null>(null);
   const [trendData, setTrendData] = useState<PriceTrends | null>(null);
+  const [mapData, setMapData] = useState<MapPriceItem[]>([]);
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async (tab: Tab, did?: number) => {
@@ -47,6 +50,9 @@ export default function AnalysisPage() {
       if (tab === "trends") {
         setTrendData(await fetchTrends(did));
       }
+      if (tab === "map") {
+        setMapData(await fetchMapPrices());
+      }
     } finally {
       setLoading(false);
     }
@@ -61,6 +67,7 @@ export default function AnalysisPage() {
 
   const TABS: { key: Tab; label: string }[] = [
     { key: "overview", label: t("analysis.overview", lang) },
+    { key: "map", label: "地图" },
     { key: "districts", label: t("analysis.districtCompare", lang) },
     { key: "factors", label: "因素分析" },
     { key: "clusters", label: "聚类画像" },
@@ -96,6 +103,7 @@ export default function AnalysisPage() {
       ) : (
         <div className="flex-1 overflow-y-auto">
           {tab === "overview" && overview && <OverviewTab overview={overview} lang={lang} />}
+          {tab === "map" && <MapTab data={mapData} />}
           {tab === "districts" && compare.length > 0 && <DistrictsTab compare={compare} />}
           {tab === "factors" && importance && <FactorsTab importance={importance} />}
           {tab === "clusters" && cluster && <ClustersTab cluster={cluster} />}
@@ -266,6 +274,32 @@ function TrendsTab({ trendData }: { trendData: PriceTrends }) {
           <p className="text-xs opacity-40">数据来源: {trendData.source === "price_history" ? "价格历史表" : "挂牌日期估算"}</p>
         </>
       )}
+    </div>
+  );
+}
+
+// ── 地图 Tab ──
+function MapTab({ data }: { data: MapPriceItem[] }) {
+  if (data.length === 0) {
+    return <div className="flex-1 flex items-center justify-center opacity-40 text-sm">暂无地图数据</div>;
+  }
+  return (
+    <div className="space-y-4">
+      <div className="rounded border border-[var(--color-accent)]">
+        <MapChart
+          title="重庆市各区县二手房均价热力图"
+          data={data}
+          height={520}
+        />
+      </div>
+      <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-xs">
+        {data.slice(0, 12).map((d) => (
+          <div key={d.name} className="rounded bg-[var(--color-accent)]/30 p-2 text-center">
+            <div className="font-medium">{d.name}</div>
+            <div className="opacity-60">{d.value > 0 ? d.value.toLocaleString() : "-"} 元/㎡</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -78,3 +78,16 @@ export async function fetchTrends(districtId?: number, months = 12): Promise<Pri
   const resp = await apiClient.get<APIResponse<PriceTrends>>("/analytics/trends", { params: { ...(districtId ? { district_id: districtId } : {}), months } });
   return resp.data.data!;
 }
+
+// ── 地图 ──
+
+export interface MapPriceItem {
+  name: string;
+  value: number;
+  count: number;
+}
+
+export async function fetchMapPrices(): Promise<MapPriceItem[]> {
+  const resp = await apiClient.get<APIResponse<MapPriceItem[]>>("/map/district-prices");
+  return resp.data.data ?? [];
+}

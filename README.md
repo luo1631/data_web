@@ -130,4 +130,4 @@ data_web/
 | Phase 4 | 前端页面：三个主界面 + UI 组件 + 图表 + i18n | ✅ 完成 |
 | Phase 5 | 数据分析：统计 + 因素分析 + 聚类 + 趋势 | ✅ 完成 |
 | Phase 6 | 增量更新：APScheduler 定时任务 + 价格历史 | ✅ 完成 |
-| Phase 7 | 地图可视化：ECharts Map + GeoJSON | ⏳ |
+| Phase 7 | 地图可视化：ECharts Map + GeoJSON | ✅ 完成 |
