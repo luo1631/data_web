@@ -63,7 +63,19 @@ data_web/
 │   │   └── utils/               # 工具
 │   │       └── response.py      #   统一响应格式
 │   │
-│   ├── crawler/                 # 爬虫模块（Phase 2）
+│   ├── crawler/                 # 爬虫模块
+│   │   ├── constants.py         #   全局常量（区县/URL/UA池）
+│   │   ├── fetcher.py           #   HTTP 客户端（UA轮换/retry/限速）
+│   │   ├── engine.py            #   爬虫引擎（asyncio 并发编排）
+│   │   ├── pipelines.py         #   数据库管线（WAL+写锁）
+│   │   ├── cleaner.py           #   数据清洗
+│   │   ├── dedup.py             #   MD5 去重 + 小区匹配
+│   │   ├── __main__.py          #   CLI 测试入口
+│   │   └── parsers/
+│   │       ├── list_parser.py   #     列表页解析器
+│   │       ├── detail_parser.py #     详情页解析器
+│   │       └── font_parser.py   #     fontTools 字体解密
+│   ├── tests/                   # 单元测试
 │   ├── analytics/               # 数据分析（Phase 5）
 │   └── scheduler/               # 定时任务（Phase 6）
 │
@@ -101,7 +113,7 @@ data_web/
 | Phase | 内容 | 状态 |
 |-------|------|------|
 | Phase 1 | 项目骨架：FastAPI + React + SQLite + 数据模型 | ✅ 完成 |
-| Phase 2 | 爬虫开发：fang.com 解析 + 字体解密 + 并发调度 | ⏳ |
+| Phase 2 | 爬虫开发：fang.com 解析 + 字体解密 + 并发调度 | ✅ 完成 |
 | Phase 3 | 后端 API：房源 CRUD + 筛选排序 + 爬取控制 + SSE | ⏳ |
 | Phase 4 | 前端页面：三个主界面 + UI 组件 + 图表 + i18n | ⏳ |
 | Phase 5 | 数据分析：统计 + 因素分析 + 聚类 + 趋势 | ⏳ |

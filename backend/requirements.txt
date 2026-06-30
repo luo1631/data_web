@@ -20,6 +20,7 @@ beautifulsoup4==4.12.3
 lxml==5.2.2
 fonttools==4.53.0
 tenacity==8.5.0
+jellyfish==1.0.4
 
 # 数据分析
 pandas==2.2.2
