@@ -1,0 +1,37 @@
+// ECharts 封装 — 饼图组件
+
+import ReactECharts from "echarts-for-react";
+import { useThemeStore } from "../../stores/useThemeStore";
+
+interface Props {
+  title?: string;
+  data: { name: string; value: number }[];
+  height?: number;
+  roseType?: boolean;
+}
+
+const COLORS = ["#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de", "#3ba272", "#fc8452", "#9a60b4"];
+
+export default function PieChart({ title, data, height = 280, roseType = false }: Props) {
+  const { theme } = useThemeStore();
+  const isDark = theme === "dark";
+
+  const option = {
+    title: title ? { text: title, left: "center", textStyle: { fontSize: 13, color: isDark ? "#e0e0e0" : "#333" } } : undefined,
+    tooltip: { trigger: "item" as const },
+    legend: { bottom: 0, textStyle: { color: isDark ? "#aaa" : "#666", fontSize: 10 } },
+    series: [{
+      type: "pie" as const,
+      radius: roseType ? ["20%", "70%"] : "60%",
+      center: ["50%", "48%"],
+      roseType: roseType ? "area" as const : undefined,
+      itemStyle: { borderRadius: 4, borderColor: isDark ? "#1a1a1d" : "#fff", borderWidth: 2 },
+      label: { formatter: "{b}\n{d}%", fontSize: 10 },
+      data,
+      color: COLORS,
+    }],
+    backgroundColor: "transparent",
+  };
+
+  return <ReactECharts option={option} style={{ height }} />;
+}
