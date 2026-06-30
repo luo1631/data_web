@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Microsoft YaHei", "微软雅黑", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* 亮色主题 */
+:root {
+  --color-primary: #122e8a;
+  --color-primary-bg: #f5efea;
+  --color-accent: #d9d3e8;
+  --color-text: #1a1a1a;
+  --color-text-inverse: #ffffff;
+}
+
+/* 暗色主题 */
+.dark {
+  --color-primary: #e6397c;
+  --color-primary-bg: #1a1a1d;
+  --color-accent: #301f28;
+  --color-text: #e0e0e0;
+  --color-text-inverse: #ffffff;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background-color: var(--color-primary-bg);
+  color: var(--color-text);
+  transition: background-color 0.3s, color 0.3s;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+}
