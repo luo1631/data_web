@@ -42,9 +42,9 @@ class DatabasePipeline:
     async def __aenter__(self) -> "DatabasePipeline":
         self._write_session = self._factory()
         # 启用 WAL mode + 设置 busy_timeout
-        async with self._write_session.begin() as conn:
-            await conn.execute(text("PRAGMA journal_mode=WAL"))
-            await conn.execute(text("PRAGMA busy_timeout=30000"))
+        async with self._write_session.begin():
+            await self._write_session.execute(text("PRAGMA journal_mode=WAL"))
+            await self._write_session.execute(text("PRAGMA busy_timeout=30000"))
         return self
 
     async def __aexit__(self, *args) -> None:
@@ -154,7 +154,7 @@ class DatabasePipeline:
             return task.id
 
     async def create_crawl_task(
-        self, batch_id: int, district_id: int
+        self, batch_id: int, district_id: int | None
     ) -> int:
         """为区县创建爬取任务记录（始终创建新任务）。"""
         task = CrawlTask(
@@ -309,23 +309,14 @@ class DatabasePipeline:
     # ── Community ─────────────────────────────────────
 
     async def upsert_community(
-        self, name: str, district_id: int, address: str | None
+        self, name: str, district_id: int, address: str | None,
+        lng: float | None = None, lat: float | None = None,
     ) -> int:
-        """查找或创建小区记录（带写锁保护，防并发重复）。
-
-        Args:
-            name: 小区名称
-            district_id: 所属区县 ID
-            address: 地址（可选）
-
-        Returns:
-            community_id
-        """
+        """查找或创建小区记录（带写锁保护，防并发重复）。"""
         if not name:
             name = "未知小区"
 
         async with self._write_lock:
-            # 先查是否存在
             result = await self._write_session.execute(
                 select(Community.id).where(
                     Community.name == name,
@@ -334,14 +325,27 @@ class DatabasePipeline:
             )
             existing = result.scalar_one_or_none()
             if existing is not None:
+                # 更新地址和坐标（如果提供了新数据）
+                if address or lng is not None:
+                    update_vals = {}
+                    if address:
+                        update_vals["address"] = address
+                    if lng is not None:
+                        update_vals["lng"] = lng
+                    if lat is not None:
+                        update_vals["lat"] = lat
+                    if update_vals:
+                        await self._write_session.execute(
+                            update(Community).where(Community.id == existing).values(**update_vals)
+                        )
+                        await self._write_session.commit()
                 return existing
 
-            # 不存在则创建
             self._write_session.add(
-                Community(name=name, district_id=district_id, address=address)
+                Community(name=name, district_id=district_id, address=address,
+                          lng=lng, lat=lat)
             )
             await self._write_session.commit()
-            # 获取自增 ID
             result = await self._write_session.execute(
                 select(Community.id).where(
                     Community.name == name,

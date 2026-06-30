@@ -35,9 +35,14 @@ def clean_listing(
           community_name, community_address, listing_date, title
         所有值都可能为 None。
     """
-    total_price = parse_price(decrypted_total) if decrypted_total else None
-    unit_price = parse_unit_price(decrypted_unit) if decrypted_unit else None
-    area = parse_area(parsed.area) if parsed.area else None
+    # 价格：优先使用 parsed 中已有的 float 值（移动站），否则从字符串解析
+    total_price = parsed.total_price if isinstance(parsed.total_price, (int, float)) else (
+        parse_price(decrypted_total) if decrypted_total else None
+    )
+    unit_price = parsed.unit_price if isinstance(parsed.unit_price, (int, float)) else (
+        parse_unit_price(decrypted_unit) if decrypted_unit else None
+    )
+    area = parse_area(str(parsed.area)) if parsed.area else None
 
     # 交叉验证：如果单总价和面积都有，计算验证
     if total_price is not None and unit_price is not None and area is not None:

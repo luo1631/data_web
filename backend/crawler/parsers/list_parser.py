@@ -1,137 +1,133 @@
 """
-列表页 HTML 解析器：从 fang.com 区县列表页提取房源 ID 列表。
+列表页解析器 — m.fang.com 移动站。
 
-所有方法均为纯静态方法，无状态，输入 HTML 输出结构化数据。
+每条房源格式:
+  <li class="listhouse" data-bg='{"houseid":"204649634", ...}'>
+    <a href="/esf/cq/3_204649634.html">
+      <div class="txt">
+        <h3>标题</h3>
+        <div class="price"><em>1200</em>万</div>
+      </div>
 """
 
+import json
 import re
 from bs4 import BeautifulSoup
 
 
 class ListParser:
-    """fang.com 区县列表页解析器。
-
-    房天下列表页 URL 示例:
-        /housing/house/list/yubei__0_0_0_0_1_0_0_0/
-
-    注意：房天下 DOM 结构可能随时调整，CSS 选择器需定期验证。
-    """
-
-    # ── CSS 选择器（可能需要根据实际页面结构调整）──
-
-    # 列表容器（每一条房源信息）
-    LIST_ITEM_SELECTOR = "div.houseList dl, div.list dl, .houseList dl"
-
-    # 房源链接（从链接 href 提取 ID）
-    LISTING_LINK_SELECTOR = "a[href*='chushou']"
-
-    # 房源总数文本
-    TOTAL_COUNT_SELECTOR = "span.fy_text span, .total span"
-
-    # ── public API ───────────────────────────────────
+    """移动站列表页解析器"""
 
     @staticmethod
-    def parse_listing_ids(html: str) -> list[str]:
-        """从列表页 HTML 提取所有房源 external_id。
-
-        Args:
-            html: 列表页 HTML 字符串
+    def parse_listing_data(html: str) -> list[dict]:
+        """从列表页提取所有房源的基本信息（JSON + HTML）。
 
         Returns:
-            房源 ID 列表（空列表表示该页无房源）
+            [{house_id, title, total_price, room_layout, area,
+              orientation, community_name, floor_info, decoration, listing_date}]
         """
         soup = BeautifulSoup(html, "lxml")
-        ids: list[str] = []
+        items = soup.select("li.listhouse")
+        result = []
 
-        # 方式1: 从房源链接提取 ID
-        links = soup.select(ListParser.LISTING_LINK_SELECTOR)
-        for link in links:
-            href = link.get("href", "")
-            listing_id = ListParser._extract_id_from_url(href)
-            if listing_id:
-                ids.append(listing_id)
+        for li in items:
+            data = {}
+            # 从链接 href 提取完整 house_id（如 3_204649634）
+            link = li.select_one("a[href*='/esf/cq/']")
+            if link:
+                href = link.get("href", "")
+                m = re.search(r'/esf/cq/([^/?]+)\.html', href)
+                if m:
+                    data["house_id"] = m.group(1)
 
-        # 方式2: 从 data-id 属性提取（备选）
-        if not ids:
-            items = soup.select(ListParser.LIST_ITEM_SELECTOR)
-            for item in items:
-                data_id = item.get("data-id", "") or item.get("data-houseid", "")
-                if data_id and data_id not in ids:
-                    ids.append(str(data_id))
+            # 回退: data-bg JSON
+            if not data.get("house_id"):
+                bg_attr = li.get("data-bg", "")
+                if bg_attr:
+                    try:
+                        bg = json.loads(bg_attr.replace("'", '"'))
+                        raw_id = bg.get("houseid", "")
+                        if raw_id:
+                            # 推断前缀（通常格式: type_number）
+                            listingtype = bg.get("listingtype", "2")
+                            prefix = listingtype.split(",")[0] if "," in listingtype else "3"
+                            data["house_id"] = f"{prefix}_{raw_id}"
+                    except json.JSONDecodeError:
+                        pass
 
-        # 方式3: 正则从全文提取 chushou/数字.htm 链接
-        if not ids:
-            pattern = re.compile(r'/chushou/(\d+)\.htm')
-            ids = pattern.findall(html)
+            if not data.get("house_id"):
+                continue
 
-        return list(dict.fromkeys(ids))  # 去重保序
+            # 3. 提取文本字段
+            title_el = li.select_one("h3, .tit, .title")
+            if title_el:
+                data["title"] = title_el.get_text(strip=True)
+
+            price_el = li.select_one(".price em, .price strong, .price, .totalprice")
+            if price_el:
+                txt = price_el.get_text(strip=True)
+                m = re.search(r'([\d.]+)\s*万', txt)
+                if m:
+                    data["total_price"] = float(m.group(1))
+
+            # 户型/面积/朝向等 — 从 li 的全部文本中提取
+            full_text = li.get_text(" ", strip=True)
+            # 户型
+            m = re.search(r'(\d+)室(\d+)厅(\d+)卫', full_text)
+            if m:
+                data["room_count"] = int(m.group(1))
+                data["hall_count"] = int(m.group(2))
+                data["bathroom_count"] = int(m.group(3))
+            else:
+                m2 = re.search(r'(\d+)室(\d+)厅', full_text)
+                if m2:
+                    data["room_count"] = int(m2.group(1))
+                    data["hall_count"] = int(m2.group(2))
+
+            # 面积
+            m = re.search(r'([\d.]+)\s*m?㎡|([\d.]+)\s*[平米/]', full_text)
+            area_m = re.search(r'([\d.]+)\s*m?[²㎡]', full_text)
+            if not area_m:
+                area_m = re.search(r'([\d.]+)\s*平米', full_text)
+            if area_m:
+                data["area"] = float(area_m.group(1))
+
+            # 朝向
+            for o in ["南", "北", "东南", "西南", "东北", "西北", "东", "西", "南北"]:
+                if o in full_text:
+                    data["orientation"] = o
+                    break
+
+            # 楼层
+            for kw in ["低楼层", "中楼层", "高楼层", "底层", "中层", "高层"]:
+                if kw in full_text:
+                    data["floor_level"] = kw
+                    break
+
+            # 装修
+            for kw in ["精装", "豪装", "简装", "毛坯", "中装"]:
+                if kw in full_text:
+                    data["decoration"] = kw
+                    break
+
+            # 小区名
+            comm_el = li.select_one(".community, .xiaoqu, .plot, a[href*='xiaoqu']")
+            if comm_el:
+                data["community_name"] = comm_el.get_text(strip=True)
+
+            result.append(data)
+
+        return result
 
     @staticmethod
     def parse_total_count(html: str) -> int:
-        """解析区县总房源数。
-
-        fang.com 页面通常显示 "共找到 XXXX 套房源"
-
-        Args:
-            html: 列表页 HTML 字符串
-
-        Returns:
-            总房源数，解析失败返回 0
-        """
-        soup = BeautifulSoup(html, "lxml")
-        elems = soup.select(ListParser.TOTAL_COUNT_SELECTOR)
-        for elem in elems:
-            text = elem.get_text(strip=True)
-            match = re.search(r'(\d[\d,]*)', text)
-            if match:
-                return int(match.group(1).replace(",", ""))
-
-        # 备选：全页搜索
-        match = re.search(r'共[^\d]*(\d[\d,]*)[^\d]*套', html)
-        if match:
-            return int(match.group(1).replace(",", ""))
-
+        """从列表页提取总房源数（隐藏 input total 或文本）。"""
+        # <input type="hidden" id="total" value="523534"/>
+        m = re.search(r'(?:total|totalCount)[\"\']?\s*value=[\"\']?(\d+)', html, re.I)
+        if m:
+            return int(m.group(1))
+        # 文本 "共 523534 套"
+        m = re.search(r'(\d[\d,]*)\s*(?:套|条|房源)', html)
+        if m:
+            return int(m.group(1).replace(",", ""))
         return 0
-
-    @staticmethod
-    def calculate_total_pages(total_count: int, per_page: int = 30) -> int:
-        """根据总房源数估算最大页数。
-
-        房天下每页约 30 条，但最多返回 100 页。
-        """
-        pages = (total_count + per_page - 1) // per_page
-        return min(pages, 100)
-
-    @staticmethod
-    def has_listings(html: str) -> bool:
-        """检测页面是否包含房源列表。
-
-        用于判断是否到达末页（或该区县无数据）。
-        """
-        soup = BeautifulSoup(html, "lxml")
-        # 有房源链接即说明有数据
-        if soup.select(ListParser.LISTING_LINK_SELECTOR):
-            return True
-        # 检查是否有 "暂无数据" 等提示
-        body = soup.get_text()
-        if any(kw in body for kw in ["暂无房源", "没有找到", "抱歉"]):
-            return False
-        # 没有链接但也没有 "暂无数据" → 可能是空页
-        return bool(soup.select(ListParser.LIST_ITEM_SELECTOR))
-
-    # ── internal ─────────────────────────────────────
-
-    @staticmethod
-    def _extract_id_from_url(url: str) -> str | None:
-        """从房源链接中提取 ID。
-
-        预期格式: /chushou/1234567890.htm 或类似变体
-        """
-        match = re.search(r'/chushou/(\d+)', url)
-        if match:
-            return match.group(1)
-        # 备选：匹配其他可能的 ID 模式（12位以上数字）
-        match = re.search(r'/(\d{10,})\.htm', url)
-        if match:
-            return match.group(1)
-        return None
