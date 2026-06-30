@@ -22,7 +22,19 @@
     "newListings": "New Listings",
     "updatedListings": "Updated",
     "noActiveCrawl": "No active crawl task",
-    "historyBatches": "History"
+    "historyBatches": "History",
+    "selectedCount": "Selected {n} districts",
+    "noSelection": "None selected (all {total} districts will be crawled)",
+    "crawlType": "Crawl Type",
+    "colDistrict": "District",
+    "colStatus": "Status",
+    "colPages": "Pages",
+    "colListings": "Listings",
+    "colId": "ID",
+    "colType": "Type",
+    "colNew": "New",
+    "colUpdated": "Updated",
+    "noHistory": "No history"
   },
   "storage": {
     "title": "Data Browser",
@@ -68,6 +80,7 @@
     "totalListings": "Active Listings",
     "avgPrice": "Avg Price",
     "medianPrice": "Median Price",
+    "avgUnitPrice": "Avg Unit (¥/㎡)",
     "maxPrice": "Max Price",
     "minPrice": "Min Price",
     "priceDistribution": "Price Distribution",

@@ -29,7 +29,7 @@ const ORIENTATION_OPTS = [
 export default function DataStoragePage() {
   const { lang } = useThemeStore();
   const { districts } = useDistricts();
-  const { data, total, loading, filters, updateFilter, setPage } = useListings();
+  const { data, total, loading, filters, updateFilter, updateFilters, setPage } = useListings();
   const [sortKey, setSortKey] = useState("last_updated_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -41,24 +41,20 @@ export default function DataStoragePage() {
   const handleSort = (key: string, dir: "asc" | "desc") => {
     setSortKey(key);
     setSortDir(dir);
-    updateFilter("sort_by", key);
-    updateFilter("order", dir);
+    updateFilters({ sort_by: key, order: dir } as any);
   };
 
   const handleReset = () => {
-    updateFilter("district_id", undefined);
-    updateFilter("min_price", undefined);
-    updateFilter("max_price", undefined);
-    updateFilter("min_area", undefined);
-    updateFilter("max_area", undefined);
-    updateFilter("room_count", undefined);
-    updateFilter("decoration", undefined);
-    updateFilter("orientation", undefined);
-    updateFilter("keyword", undefined);
-    updateFilter("sort_by", "last_updated_at");
-    updateFilter("order", "desc");
     setSortKey("last_updated_at");
     setSortDir("desc");
+    updateFilters({
+      district_id: undefined,
+      min_price: undefined, max_price: undefined,
+      min_area: undefined, max_area: undefined,
+      room_count: undefined, decoration: undefined,
+      orientation: undefined, keyword: undefined,
+      sort_by: "last_updated_at", order: "desc",
+    });
   };
 
   const columns: Column<Listing>[] = [

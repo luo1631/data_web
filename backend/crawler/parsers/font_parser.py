@@ -116,13 +116,13 @@ class FontDecryptor:
         Returns:
             {glyph_name: unicode_char} — 如 {"uniE001": "", ...}
         """
-        font = TTFont(None)  # 先创建空对象
         try:
-            # fontTools >= 4.4 支持直接从 bytes 解析
             from io import BytesIO
             font = TTFont(BytesIO(font_bytes))
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"fontTools TTFont parse failed: {e}")
+            return {}
 
         cmap = font.getBestCmap()
         if not cmap:

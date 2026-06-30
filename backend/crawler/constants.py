@@ -200,4 +200,4 @@ FLOOR_LEVEL_MAP: dict[str, str] = {
 JARO_WINKLER_THRESHOLD = 0.92       # Jaro-Winkler 相似度阈值
 
 # 小区名规范化时需移除的干扰字符（分隔符等）
-COMMUNITY_NAME_STRIP_CHARS = "·•-－— _"
+COMMUNITY_NAME_STRIP_CHARS = "·•-－—"

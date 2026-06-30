@@ -22,7 +22,19 @@
     "newListings": "新增房源",
     "updatedListings": "更新房源",
     "noActiveCrawl": "暂无运行中的爬取任务",
-    "historyBatches": "历史批次"
+    "historyBatches": "历史批次",
+    "selectedCount": "已选 {n} 个区县",
+    "noSelection": "未选择（将爬取全部 {total} 区县）",
+    "crawlType": "爬取类型",
+    "colDistrict": "区县",
+    "colStatus": "状态",
+    "colPages": "页数",
+    "colListings": "房源数",
+    "colId": "ID",
+    "colType": "类型",
+    "colNew": "新增",
+    "colUpdated": "更新时间",
+    "noHistory": "暂无历史批次"
   },
   "storage": {
     "title": "数据浏览",
@@ -68,6 +80,7 @@
     "totalListings": "在售房源",
     "avgPrice": "全市均价",
     "medianPrice": "中位价",
+    "avgUnitPrice": "均价(元/㎡)",
     "maxPrice": "最高总价",
     "minPrice": "最低总价",
     "priceDistribution": "价格分布",

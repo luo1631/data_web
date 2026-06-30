@@ -71,8 +71,10 @@ export function createCrawlSSE(
   };
 
   es.onerror = () => {
-    es.close();
-    onComplete?.();
+    // 仅当连接已关闭时才通知完成（SSE 在遇到瞬时错误时会自动重连）
+    if (es.readyState === EventSource.CLOSED) {
+      onComplete?.();
+    }
   };
 
   return es;

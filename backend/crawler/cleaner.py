@@ -45,8 +45,11 @@ def clean_listing(
         if computed_total > 0:
             diff_ratio = abs(total_price - computed_total) / computed_total
             if diff_ratio > PRICE_OUTLIER["cross_check_tolerance"]:
-                # 偏差过大，标记为可疑但保留数据
-                pass
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"Price cross-check mismatch: total={total_price}万, "
+                    f"unit={unit_price}元/㎡, area={area}㎡, expected={computed_total:.1f}万"
+                )
 
     listing_date = parse_date(parsed.listing_date)
 

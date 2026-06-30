@@ -49,20 +49,28 @@ async def list_communities(
     result = await db.execute(stmt)
     communities = result.scalars().all()
 
-    # 每个小区附带上在售房源数和均价
-    items = []
-    for comm in communities:
-        stats = await db.execute(
+    # 批量查询各小区房源统计（单次 GROUP BY）
+    comm_ids = [c.id for c in communities]
+    stats_map: dict[int, tuple[int, float | None]] = {}
+    if comm_ids:
+        stats_result = await db.execute(
             select(
+                Listing.community_id,
                 func.count(Listing.id).label("cnt"),
                 func.avg(Listing.unit_price).label("avg_price"),
             ).where(
-                Listing.community_id == comm.id,
+                Listing.community_id.in_(comm_ids),
                 Listing.status == "active",
-            )
+            ).group_by(Listing.community_id)
         )
-        row = stats.one()
+        stats_map = {
+            row.community_id: (row.cnt, float(row.avg_price) if row.avg_price else None)
+            for row in stats_result.all()
+        }
 
+    items = []
+    for comm in communities:
+        cnt, avg_p = stats_map.get(comm.id, (0, None))
         items.append(CommunityRead(
             id=comm.id,
             name=comm.name,
@@ -77,8 +85,8 @@ async def list_communities(
             plot_ratio=comm.plot_ratio,
             lng=comm.lng,
             lat=comm.lat,
-            listing_count=row.cnt or 0,
-            avg_price=round(float(row.avg_price), 2) if row.avg_price else None,
+            listing_count=cnt,
+            avg_price=round(avg_p, 2) if avg_p else None,
             created_at=comm.created_at,
         ).model_dump())
 

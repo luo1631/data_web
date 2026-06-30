@@ -47,7 +47,7 @@ export default function AnalysisPage() {
               <Card label={t("analysis.medianPrice", lang)} value={summary.median_total_price ? `${summary.median_total_price}万` : "-"} />
               <Card label={t("analysis.minPrice", lang)} value={summary.min_price ? `${summary.min_price}万` : "-"} />
               <Card label={t("analysis.maxPrice", lang)} value={summary.max_price ? `${summary.max_price}万` : "-"} />
-              <Card label="均价(元/㎡)" value={summary.avg_unit_price ? summary.avg_unit_price.toLocaleString() : "-"} />
+              <Card label={t("analysis.avgUnitPrice", lang)} value={summary.avg_unit_price ? summary.avg_unit_price.toLocaleString() : "-"} />
             </div>
           </section>
 

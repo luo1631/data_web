@@ -191,7 +191,6 @@ async def cmd_calibrate_font(args):
             return
 
         glyphs = FontDecryptor.parse_font_glyphs(font_bytes)
-        chars = sorted({chr(u) for u in FontDecryptor.parse_font_glyphs.__defaults__ or []}) if False else []
 
         # 显示字形供标定
         print(f"\nEncrypted glyphs ({len(glyphs)}):")

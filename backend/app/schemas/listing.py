@@ -78,6 +78,13 @@ class ListingFilter(BaseModel):
 
 # ── 汇总统计 ──
 
+class PriceRangeInfo(BaseModel):
+    """价格段信息"""
+    range_label: str           # "50万以下", "50-100万", ...
+    count: int
+    pct: float                 # 占比(%)
+
+
 class ListingSummary(BaseModel):
     """房源汇总统计"""
     total_listings: int = 0
@@ -88,11 +95,4 @@ class ListingSummary(BaseModel):
     min_price: float | None = None
     max_price: float | None = None
     avg_area: float | None = None
-    price_bins: list[dict] = []  # [{range: "50-100万", count: 1200}, ...]
-
-
-class PriceRangeInfo(BaseModel):
-    """价格段信息"""
-    range_label: str           # "50万以下", "50-100万", ...
-    count: int
-    pct: float                 # 占比(%)
+    price_bins: list[PriceRangeInfo] = []

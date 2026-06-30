@@ -150,7 +150,7 @@ async def get_listing_detail(
         decoration=listing.decoration,
         building_type=listing.building_type,
         building_structure=listing.building_structure,
-        has_elevator=bool(listing.has_elevator) if listing.has_elevator is not None else None,
+        has_elevator=listing.has_elevator,
         listing_date=listing.listing_date,
         listing_age_days=listing.listing_age_days,
         status=listing.status or "active",
@@ -247,7 +247,7 @@ async def get_listing_summary(
         min_price=round(float(row.min_price), 2) if row.min_price else None,
         max_price=round(float(row.max_price), 2) if row.max_price else None,
         avg_area=round(float(row.avg_area), 2) if row.avg_area else None,
-        price_bins=[b.model_dump() for b in bins],
+        price_bins=bins,
     )
 
 

@@ -1,7 +1,7 @@
 """房源 API 端点：列表查询（分页+筛选+排序）、详情、价格历史、汇总统计"""
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select, and_
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db

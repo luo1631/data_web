@@ -1,6 +1,6 @@
 """爬取控制 API 端点：启动/停止/状态查询/SSE 进度流"""
 
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +13,6 @@ from app.services.crawl_service import (
     get_crawl_progress,
     get_batches,
     generate_sse_events,
-    is_crawling,
 )
 from app.utils.response import ok, error
 
@@ -21,20 +20,8 @@ router = APIRouter(prefix="/crawl", tags=["crawl"])
 
 
 @router.post("/start")
-async def crawl_start(
-    body: CrawlStartRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    """启动爬取任务。
-
-    请求体:
-        - type: "full" | "incremental"
-        - districts: 区县 ID 列表（空=全部）
-        - max_pages_per_district: 每区县最大页数（默认 100）
-    """
-    if is_crawling():
-        return error(code=409, message="已有爬取任务在运行中，请先停止后再启动")
-
+async def crawl_start(body: CrawlStartRequest):
+    """启动爬取任务。"""
     try:
         result = await start_crawl(db_session_factory, body)
         return ok(data=result.model_dump(), message=result.message)
@@ -76,15 +63,12 @@ async def crawl_status_stream(batch_id: int):
 
 
 @router.post("/stop/{batch_id}")
-async def crawl_stop(
-    batch_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    """停止爬取任务 — 发送停止信号，正在进行的操作完成后退出。"""
+async def crawl_stop(batch_id: int):
+    """停止爬取任务。"""
     result = await stop_crawl(batch_id)
     if result:
         return ok(data={"stopped": True}, message="停止信号已发送")
-    return ok(data={"stopped": False}, message="当前无运行中的爬取任务")
+    return ok(data={"stopped": False}, message="当前无运行中的爬取任务或批次不匹配")
 
 
 @router.get("/batches")

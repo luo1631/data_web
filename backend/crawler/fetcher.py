@@ -144,7 +144,7 @@ class Fetcher:
         实际延迟 = base_delay * jitter，其中 base_delay 在范围内随机，
         jitter 在 JITTER_RANGE 内随机。
         """
-        now = asyncio.get_event_loop().time()
+        now = asyncio.get_running_loop().time()
         last = self._last_request.get(group, 0)
         elapsed = now - last
 
@@ -182,7 +182,7 @@ class Fetcher:
         resp = await client.get(url, headers=headers)
 
         if resp.status_code == 429:
-            raise RuntimeError(f"Rate limited: {url}")
+            resp.raise_for_status()  # raises httpx.HTTPStatusError → retried
 
         resp.raise_for_status()
         return resp.text

@@ -200,8 +200,8 @@ class DetailParser:
         try:
             tag = self._soup.select_one(
                 ".area, .build-area, .buildArea, .mianji, "
-                ".info-item:has(:contains('面积')) span, "
-                ".trl-item:has(:contains('面积')) .rcont"
+                ".info-item:has(>:-soup-contains('面积')) span, "
+                ".trl-item:has(>:-soup-contains('面积')) .rcont"
             )
             if tag:
                 text = tag.get_text(strip=True)
@@ -216,8 +216,8 @@ class DetailParser:
             # 尝试找到户型文本
             for selector in [
                 ".room, .huxing, .layout, .house-type, .hx",
-                ".info-item:has(:contains('户型')) span",
-                ".trl-item:has(:contains('户型')) .rcont",
+                ".info-item:has(>:-soup-contains('户型')) span",
+                ".trl-item:has(>:-soup-contains('户型')) .rcont",
             ]:
                 tag = self._soup.select_one(selector)
                 if tag:
@@ -236,7 +236,7 @@ class DetailParser:
 
     @staticmethod
     def _parse_layout_text(text: str) -> tuple[int | None, int | None, int | None]:
-        match = re.search(r'(\d+)\s*室\s*(\d+)\s*厅\s*(\d+)\s*[卫廚厨]?', text)
+        match = re.search(r'(\d+)\s*室\s*(\d+)\s*厅\s*(\d+)\s*[卫]?', text)
         if match:
             return int(match.group(1)), int(match.group(2)), int(match.group(3))
         # 备选：数字序列 "3/2/1"
@@ -251,8 +251,8 @@ class DetailParser:
         try:
             for selector in [
                 ".floor, .floor-info, .ceng, .louceng",
-                ".info-item:has(:contains('楼层')) span",
-                ".trl-item:has(:contains('楼层')) .rcont",
+                ".info-item:has(>:-soup-contains('楼层')) span",
+                ".trl-item:has(>:-soup-contains('楼层')) .rcont",
             ]:
                 tag = self._soup.select_one(selector)
                 if tag:
@@ -331,8 +331,8 @@ class DetailParser:
         try:
             for selector in [
                 ".community-name, .communityName, .xiaoqu-name, .xq-name",
-                ".info-item:has(:contains('小区')) span, .info-item:has(:contains('小区')) a",
-                ".trl-item:has(:contains('小区')) .rcont a",
+                ".info-item:has(>:-soup-contains('小区')) span, .info-item:has(>:-soup-contains('小区')) a",
+                ".trl-item:has(>:-soup-contains('小区')) .rcont a",
                 "a[href*='community'], a[href*='xiaoqu']",
             ]:
                 tag = self._soup.select_one(selector)

@@ -67,6 +67,7 @@ class CrawlEngine:
         district_ids: list[int] | None = None,
         batch_type: str = "full",
         max_pages: int = MAX_PAGES_PER_DISTRICT,
+        pre_created_batch_id: int | None = None,
     ) -> dict:
         """全量爬取入口。
 
@@ -74,27 +75,39 @@ class CrawlEngine:
             district_ids: 指定区县数据库 ID 列表，None 表示全部
             batch_type: 批次类型 "full" / "incremental"
             max_pages: 每区县最大列表页数
+            pre_created_batch_id: 如果调用方已预先创建了 CrawlBatch 记录，
+                                 则传入已有的 batch_id，引擎不再重复创建。
 
         Returns:
             统计摘要 dict
         """
         self._running = True
+        # 重置计数器（支持复用同一实例）
+        self._new_count = 0
+        self._updated_count = 0
+        self._unchanged_count = 0
+        self._error_count = 0
+        self._errors: list[dict] = []
 
         async with Fetcher() as fetcher, DatabasePipeline(
             self._session_factory
         ) as pipeline:
 
-            # 确定要爬的区县
             districts = await self._resolve_districts(pipeline, district_ids)
             if not districts:
                 return {"error": "no districts to crawl"}
 
-            # 创建爬取批次
-            batch_id = await pipeline.create_crawl_batch(
-                batch_type=batch_type, total_districts=len(districts)
-            )
+            # 创建或复用爬取批次
+            if pre_created_batch_id is not None:
+                batch_id = pre_created_batch_id
+                await pipeline.update_crawl_batch(
+                    batch_id, total_tasks=len(districts)
+                )
+            else:
+                batch_id = await pipeline.create_crawl_batch(
+                    batch_type=batch_type, total_districts=len(districts)
+                )
 
-            # 并发爬取所有区县
             tasks = [
                 self.crawl_district(
                     db_id=d["id"],
@@ -109,17 +122,16 @@ class CrawlEngine:
             ]
             await asyncio.gather(*tasks, return_exceptions=True)
 
-            # 完成批次
-            await pipeline.finish_crawl_batch(batch_id, "completed")
+            # 先写统计，再标完成
             await pipeline.update_crawl_batch(
                 batch_id,
                 new_listings=self._new_count,
                 updated_listings=self._updated_count,
                 removed_listings=0,
-                error_summary=str(self._errors[:100]),  # 最多保留100条
+                error_summary=str(self._errors[:100]),
             )
+            await pipeline.finish_crawl_batch(batch_id, "completed")
 
-        self._running = False
         return {
             "new": self._new_count,
             "updated": self._updated_count,
@@ -327,6 +339,7 @@ class CrawlEngine:
             self._errors.append({
                 "listing_id": listing_id,
                 "error": str(e),
+                "traceback": traceback.format_exc(),
             })
 
     async def _resolve_districts(

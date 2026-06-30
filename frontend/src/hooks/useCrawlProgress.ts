@@ -23,6 +23,7 @@ export function useCrawlProgress() {
   const stop = useCallback(async () => {
     if (!store.activeBatchId) return;
     await stopCrawl(store.activeBatchId);
+    store.setEventSource(null); // 关闭 SSE 连接
     store.setActiveBatch(null);
   }, [store]);
 
@@ -36,7 +37,13 @@ export function useCrawlProgress() {
   }, []);
 
   return {
-    ...store,
+    activeBatchId: store.activeBatchId,
+    progress: store.progress,
+    selectedDistricts: store.selectedDistricts,
+    isRunning: store.progress?.status === "running",
+    toggleDistrict: store.toggleDistrict,
+    selectAllDistricts: store.selectAllDistricts,
+    clearSelection: store.clearSelection,
     start,
     stop,
     loadBatch,

@@ -240,7 +240,7 @@ class DatabasePipeline:
     async def _record_price_change(
         self, existing: Listing, new_data: dict
     ) -> None:
-        """记录价格历史变更。"""
+        """记录价格历史变更（仅 add，不单独 commit）。"""
         new_total = new_data.get("total_price")
         new_unit = new_data.get("unit_price")
 
@@ -256,14 +256,14 @@ class DatabasePipeline:
                     record_date=date.today(),
                 )
             )
-            await self._write_session.commit()
+            # 不在这里 commit — 由调用者的 commit 统一提交
 
     # ── Community ─────────────────────────────────────
 
     async def upsert_community(
         self, name: str, district_id: int, address: str | None
     ) -> int:
-        """查找或创建小区记录。
+        """查找或创建小区记录（带写锁保护，防并发重复）。
 
         Args:
             name: 小区名称
@@ -277,15 +277,28 @@ class DatabasePipeline:
             name = "未知小区"
 
         async with self._write_lock:
+            # 先查是否存在
+            result = await self._write_session.execute(
+                select(Community.id).where(
+                    Community.name == name,
+                    Community.district_id == district_id,
+                ).limit(1)
+            )
+            existing = result.scalar_one_or_none()
+            if existing is not None:
+                return existing
+
+            # 不存在则创建
             self._write_session.add(
                 Community(name=name, district_id=district_id, address=address)
             )
             await self._write_session.commit()
             # 获取自增 ID
             result = await self._write_session.execute(
-                select(Community.id).where(Community.name == name).order_by(
-                    Community.id.desc()
-                ).limit(1)
+                select(Community.id).where(
+                    Community.name == name,
+                    Community.district_id == district_id,
+                ).order_by(Community.id.desc()).limit(1)
             )
             cid = result.scalar_one()
             return cid
@@ -304,10 +317,7 @@ class DatabasePipeline:
         return [(row[0], row[1]) for row in result.all()]
 
     async def get_district_db_id(self, name: str) -> int | None:
-        """按区县名称查找数据库 ID。
-
-        先在内存的 DISTRICTS 常量中查找 → 再查数据库。
-        """
+        """按区县名称查找数据库 ID。"""
         from app.models.district import District
         result = await self._write_session.execute(
             select(District.id).where(District.name == name)

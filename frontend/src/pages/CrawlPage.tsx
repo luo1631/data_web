@@ -29,7 +29,7 @@ export default function CrawlPage() {
     })();
   }, [crawl.progress]); // eslint-disable-line
 
-  const isRunning = crawl.progress?.status === "running";
+  const isRunning = crawl.isRunning;
 
   const handleStart = async () => {
     const req: CrawlStartRequest = {
@@ -86,14 +86,14 @@ export default function CrawlPage() {
           </button>
           <span className="opacity-40">
             {crawl.selectedDistricts.length > 0
-              ? `已选 ${crawl.selectedDistricts.length} 个区县`
-              : "未选择（将爬取全部 38 区县）"}
+              ? t("crawl.selectedCount", lang, { n: crawl.selectedDistricts.length })
+              : t("crawl.noSelection", lang, { total: districts.length })}
           </span>
         </div>
 
         <div className="flex flex-wrap items-end gap-3">
           <Select
-            label="爬取类型"
+            label={t("crawl.crawlType", lang)}
             value={crawlType}
             onChange={(e) => setCrawlType(e.target.value)}
             options={[
@@ -144,10 +144,10 @@ export default function CrawlPage() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-[var(--color-accent)]">
-                  <th className="text-left py-1 px-2">区县</th>
-                  <th className="text-left py-1 px-2">状态</th>
-                  <th className="text-right py-1 px-2">页数</th>
-                  <th className="text-right py-1 px-2">房源数</th>
+                  <th className="text-left py-1 px-2">{t("crawl.colDistrict", lang)}</th>
+                  <th className="text-left py-1 px-2">{t("crawl.colStatus", lang)}</th>
+                  <th className="text-right py-1 px-2">{t("crawl.colPages", lang)}</th>
+                  <th className="text-right py-1 px-2">{t("crawl.colListings", lang)}</th>
                 </tr>
               </thead>
               <tbody>
@@ -189,17 +189,17 @@ export default function CrawlPage() {
           {historyLoading && <Spinner size="sm" className="inline ml-2" />}
         </h2>
         {historyBatches.length === 0 ? (
-          <p className="text-xs opacity-40">暂无历史批次</p>
+          <p className="text-xs opacity-40">{t("crawl.noHistory", lang)}</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-[var(--color-accent)]">
-                  <th className="text-left py-1 px-2">ID</th>
-                  <th className="text-left py-1 px-2">类型</th>
-                  <th className="text-left py-1 px-2">状态</th>
-                  <th className="text-right py-1 px-2">新增</th>
-                  <th className="text-right py-1 px-2">更新时间</th>
+                  <th className="text-left py-1 px-2">{t("crawl.colId", lang)}</th>
+                  <th className="text-left py-1 px-2">{t("crawl.colType", lang)}</th>
+                  <th className="text-left py-1 px-2">{t("crawl.colStatus", lang)}</th>
+                  <th className="text-right py-1 px-2">{t("crawl.colNew", lang)}</th>
+                  <th className="text-right py-1 px-2">{t("crawl.colUpdated", lang)}</th>
                 </tr>
               </thead>
               <tbody>
