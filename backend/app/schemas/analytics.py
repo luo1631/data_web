@@ -25,6 +25,8 @@ class DistrictRankItem(BaseModel):
 
 class OverviewStats(BaseModel):
     total_listings: int
+    valid_price_count: int = 0
+    valid_total_count: int = 0
     avg_total_price: float | None
     median_total_price: float | None
     avg_unit_price: float | None
@@ -33,6 +35,10 @@ class OverviewStats(BaseModel):
     median_area: float | None
     total_price_std: float | None
     unit_price_std: float | None
+    urban_count: int = 0
+    urban_avg_unit_price: float | None = None
+    suburb_count: int = 0
+    suburb_avg_unit_price: float | None = None
     district_ranking: list[DistrictRankItem]
     price_distribution: list[DistributionItem]
     area_distribution: list[DistributionItem]
@@ -90,18 +96,57 @@ class ClusterResult(BaseModel):
     scatter: list[ScatterPoint]
     pca_variance: float
     sample_size: int
+    k_selected: int = 0
 
 
 # ── 趋势 ──
 class TrendItem(BaseModel):
-    month: str
+    date: str
     avg_unit_price: float
     count: int
-    mom_pct: float | None
-    yoy_pct: float | None
-    sma_3: float | None
+    sma_7: float | None
 
 
 class PriceTrends(BaseModel):
     trends: list[TrendItem]
     source: str
+    prediction_date: str | None = None
+    predicted_price: float | None = None
+    status_note: str | None = None
+
+
+# ── 价格预测 ──
+class PredictRequest(BaseModel):
+    district_id: int | None = None
+    area: float
+    room_count: int = 3
+    hall_count: int = 2
+    floor_level: str = "中楼层"
+    orientation: str = "南"
+    decoration: str = "精装"
+    building_type: str | None = None
+
+
+class SimilarListing(BaseModel):
+    id: int
+    title: str | None
+    community_name: str | None
+    total_price: float | None
+    unit_price: float | None
+    area: float | None
+    room_count: int | None
+    hall_count: int | None
+    floor_level: str | None
+    orientation: str | None
+    decoration: str | None
+    district_name: str | None
+    source_url: str | None
+
+
+class PredictResponse(BaseModel):
+    predicted_unit_price: float | None
+    predicted_total_price: float | None
+    confidence: str
+    sample_size: int
+    r2_score: float | None
+    similar_listings: list[SimilarListing]

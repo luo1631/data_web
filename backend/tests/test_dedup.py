@@ -1,6 +1,6 @@
 """dedup.py 单元测试"""
 
-from crawler.dedup import compute_md5, is_listing_changed
+from crawler.dedup import compute_md5
 
 
 class TestComputeMd5:
@@ -68,21 +68,3 @@ class TestComputeMd5:
         }
         result = compute_md5(data)
         assert len(result) == 32
-
-
-class TestIsListingChanged:
-    class FakeListing:
-        def __init__(self, md5):
-            self.md5_hash = md5
-
-    def test_changed(self):
-        existing = self.FakeListing("abc123")
-        assert is_listing_changed(existing, "def456")
-
-    def test_unchanged(self):
-        existing = self.FakeListing("abc123")
-        assert not is_listing_changed(existing, "abc123")
-
-    def test_none_vs_value(self):
-        existing = self.FakeListing(None)
-        assert is_listing_changed(existing, "abc123")

@@ -8,9 +8,7 @@ from pydantic import BaseModel, Field
 
 class CrawlStartRequest(BaseModel):
     """启动爬取请求"""
-    type: str = Field("full", description="full | incremental")
-    districts: list[int] = Field([], description="指定区县 ID 列表，空=全部")
-    max_pages_per_district: int = Field(100, ge=1, le=100, description="每区县最大页数")
+    max_pages_per_district: int = Field(30, ge=1, le=100, description="全局最大翻页数")
 
 
 # ── 响应体 ──
@@ -58,6 +56,7 @@ class CrawlProgress(BaseModel):
     completed_tasks: int = 0
     new_listings: int = 0
     updated_listings: int = 0
+    current_district: str | None = None
     tasks: list[CrawlTaskRead] = []
 
 

@@ -1,111 +1,241 @@
 """
-价格趋势分析模块：按月聚合均价、环比/同比、简单移动平均。
+价格趋势分析模块：每日 6:00 定时计算日级均价 + SMA-7 + 次日预测。
+
+计算策略:
+  - 每日 6:00 自动计算一次当日趋势快照
+  - 服务启动时若当前时间 > 6:00，则在启动 5 分钟后补算一次
+  - API 直接返回内存缓存，无实时数据库查询
 """
 
-from datetime import date, timedelta
+import logging
+import threading
+from datetime import date, datetime, timedelta
 
-from sqlalchemy import func, select, and_, extract, text
-from sqlalchemy.ext.asyncio import AsyncSession
+import numpy as np
+from sqlalchemy import func, select, and_
 
-from app.models.listing import Listing
-from app.models.price_history import PriceHistory
+from app.database import async_session
+
+logger = logging.getLogger("analytics.trends")
+
+# ── 全局缓存 ──
+_TREND_CACHE: dict = {
+    "data": None,          # dict | None  — get_price_trends 的返回值
+    "computed_at": None,   # datetime | None
+    "status": "empty",     # "ready" | "pending" | "empty"
+}
+
+_LOCK = threading.Lock()
+PREDICTION_WINDOW = 30
+DEFAULT_DAYS = 60
 
 
-async def get_price_trends(
-    db: AsyncSession, district_id: int | None = None, months: int = 12
-) -> dict:
-    """价格趋势时间序列。
+async def compute_and_cache() -> None:
+    """执行数据库查询 + 趋势计算 + 写入全局缓存。
 
-    优先使用 price_history 表（有历史数据时），
-    若无数据则用 listing 表的 listing_date 做近似趋势。
+    此函数在异步事件循环中运行（由 APScheduler 调度）。
+    """
+    from app.models.listing import Listing
+    from app.models.price_history import PriceHistory
+
+    logger.info("[Trends] 开始计算价格趋势快照...")
+
+    try:
+        async with async_session() as db:
+            cutoff = date.today() - timedelta(days=DEFAULT_DAYS)
+
+            # 优先 price_history
+            ph_result = await db.execute(
+                select(
+                    func.strftime("%Y-%m-%d", PriceHistory.record_date).label("date"),
+                    func.avg(PriceHistory.unit_price).label("avg_price"),
+                    func.count().label("cnt"),
+                ).select_from(PriceHistory).join(
+                    Listing, PriceHistory.listing_id == Listing.id
+                ).where(
+                    Listing.status == "active",
+                    PriceHistory.record_date >= cutoff,
+                ).group_by("date").order_by("date")
+            )
+            rows = ph_result.all()
+            source = "price_history"
+
+            if not rows:
+                # 回退: listing_date
+                l_result = await db.execute(
+                    select(
+                        func.strftime("%Y-%m-%d", Listing.listing_date).label("date"),
+                        func.avg(Listing.unit_price).label("avg_price"),
+                        func.count().label("cnt"),
+                    ).where(
+                        Listing.status == "active",
+                        Listing.listing_date.isnot(None),
+                        Listing.unit_price > 0,
+                    ).group_by("date").order_by("date").limit(DEFAULT_DAYS + 10)
+                )
+                rows = l_result.all()
+                source = "listings"
+
+            if not rows:
+                # 回退: first_seen_at
+                fs_result = await db.execute(
+                    select(
+                        func.strftime("%Y-%m-%d", Listing.first_seen_at).label("date"),
+                        func.avg(Listing.unit_price).label("avg_price"),
+                        func.count().label("cnt"),
+                    ).where(
+                        Listing.status == "active",
+                        Listing.first_seen_at.isnot(None),
+                        Listing.unit_price > 0,
+                    ).group_by("date").order_by("date").limit(DEFAULT_DAYS + 10)
+                )
+                rows = fs_result.all()
+                source = "first_seen_at"
+
+            if not rows:
+                with _LOCK:
+                    _TREND_CACHE["data"] = {"trends": [], "source": "none", "prediction_date": None, "predicted_price": None}
+                    _TREND_CACHE["computed_at"] = datetime.now()
+                    _TREND_CACHE["status"] = "empty"
+                logger.warning("[Trends] 无可用数据，缓存为空")
+                return
+
+            trends = [
+                {"date": d, "avg_unit_price": round(float(a), 2), "count": c}
+                for d, a, c in rows
+            ]
+
+        # 计算衍生指标（SMA-7 + 预测）
+        result = _add_derived(trends, source)
+
+        with _LOCK:
+            _TREND_CACHE["data"] = result
+            _TREND_CACHE["computed_at"] = datetime.now()
+            _TREND_CACHE["status"] = "ready"
+
+        logger.info(
+            "[Trends] 计算完成: %d 天数据, source=%s, predicted=%s",
+            len(trends), source, result.get("predicted_price"),
+        )
+
+    except Exception:
+        logger.exception("[Trends] 价格趋势计算失败")
+        with _LOCK:
+            _TREND_CACHE["status"] = "empty"
+
+
+def get_cached_trends() -> dict:
+    """返回缓存的价格趋势数据（线程安全）。
+
+    API 端点直接调用此函数，不访问数据库。
+    """
+    with _LOCK:
+        if _TREND_CACHE["status"] == "ready":
+            return _TREND_CACHE["data"]
+        return {
+            "trends": [],
+            "source": "none",
+            "prediction_date": None,
+            "predicted_price": None,
+            "status_note": _TREND_CACHE["status"],
+        }
+
+
+def get_cache_status() -> dict:
+    """返回缓存状态（调试用）。"""
+    with _LOCK:
+        return {
+            "status": _TREND_CACHE["status"],
+            "computed_at": _TREND_CACHE["computed_at"].isoformat() if _TREND_CACHE["computed_at"] else None,
+        }
+
+
+def setup_trends_scheduler(scheduler, startup_time: datetime | None = None) -> None:
+    """注册趋势计算的定时任务。
+
+    规则:
+      1. 每日 6:00 自动计算
+      2. 启动时 > 6:00 → 启动 5 分钟后补算一次
 
     Args:
-        district_id: 限定区县
-        months: 回溯月数（默认 12 个月）
-
-    Returns:
-        {trends: [{month, avg_unit_price, count}], source: "price_history"|"listings"}
+        scheduler: APScheduler AsyncIOScheduler 实例
+        startup_time: 应用启动时间，默认 now()
     """
-    # 尝试从 price_history 获取
-    base = []
-    if district_id is not None:
-        base.append(Listing.district_id == district_id)
+    from apscheduler.triggers.cron import CronTrigger
+    from apscheduler.triggers.date import DateTrigger
 
-    if base:
-        cond = and_(PriceHistory.listing_id == Listing.id, *base)
+    now = startup_time or datetime.now()
+
+    # 每日 6:00
+    scheduler.add_job(
+        func=compute_and_cache,
+        trigger=CronTrigger(hour=6, minute=0),
+        id="trends_daily_6am",
+        replace_existing=True,
+        misfire_grace_time=600,
+    )
+    logger.info("[Trends] 已注册每日 6:00 趋势计算任务")
+
+    # 启动补算：当前时间超过今日 6:00 时，5 分钟后计算
+    today_6am = now.replace(hour=6, minute=0, second=0, microsecond=0)
+    if now >= today_6am:
+        run_at = now + timedelta(minutes=5)
+        scheduler.add_job(
+            func=compute_and_cache,
+            trigger=DateTrigger(run_date=run_at),
+            id="trends_startup_bootstrap",
+            replace_existing=True,
+        )
+        logger.info("[Trends] 启动时间 %s > 今日 6:00，将在 %s 执行首次计算", now.strftime("%H:%M"), run_at.strftime("%H:%M:%S"))
     else:
-        cond = PriceHistory.listing_id == Listing.id
-
-    ph_result = await db.execute(
-        select(
-            func.strftime("%Y-%m", PriceHistory.record_date).label("month"),
-            func.avg(PriceHistory.unit_price).label("avg_price"),
-            func.count().label("cnt"),
-        ).select_from(PriceHistory).join(Listing, cond)
-        .where(PriceHistory.record_date >= date.today() - timedelta(days=months * 32))
-        .group_by("month")
-        .order_by("month")
-    )
-
-    rows = ph_result.all()
-    if rows:
-        trends = [
-            {"month": m, "avg_unit_price": round(float(a), 2), "count": c}
-            for m, a, c in rows
-        ]
-        return _add_mom_yoy(trends, "price_history")
-
-    # 回退：用 listing_date 作为挂牌日期做近似月度均价
-    listing_base = [Listing.status == "active"]
-    if district_id is not None:
-        listing_base.append(Listing.district_id == district_id)
-
-    l_result = await db.execute(
-        select(
-            func.strftime("%Y-%m", Listing.listing_date).label("month"),
-            func.avg(Listing.unit_price).label("avg_price"),
-            func.count().label("cnt"),
-        ).where(and_(*listing_base), Listing.listing_date.isnot(None))
-        .group_by("month")
-        .order_by("month")
-        .limit(months + 2)
-    )
-
-    rows = l_result.all()
-    if rows:
-        trends = [
-            {"month": m, "avg_unit_price": round(float(a), 2), "count": c}
-            for m, a, c in rows[-months:]
-        ]
-        return _add_mom_yoy(trends, "listings")
-
-    return {"trends": [], "source": "none"}
+        logger.info("[Trends] 启动时间 %s < 今日 6:00，等待定时触发", now.strftime("%H:%M"))
 
 
-def _add_mom_yoy(trends: list[dict], source: str) -> dict:
-    """计算环比 (MoM) 和同比 (YoY)。"""
-    for i, t in enumerate(trends):
-        # 环比
-        if i > 0 and t["count"] > 0 and trends[i - 1]["avg_unit_price"]:
-            prev = trends[i - 1]["avg_unit_price"]
-            t["mom_pct"] = round((t["avg_unit_price"] - prev) / prev * 100, 2) if prev else None
-        else:
-            t["mom_pct"] = None
+# ── 内部计算函数 ──
 
-        # 同比 (12 个月前的同月)
-        ym = t["month"]
-        prev_year_month = f"{int(ym[:4]) - 1}-{ym[5:]}"
-        yoy = next((x for x in trends if x["month"] == prev_year_month), None)
-        if yoy and yoy["avg_unit_price"]:
-            t["yoy_pct"] = round(
-                (t["avg_unit_price"] - yoy["avg_unit_price"]) / yoy["avg_unit_price"] * 100, 2
-            )
-        else:
-            t["yoy_pct"] = None
-
-    # 简单移动平均 (SMA-3)
+def _add_derived(trends: list[dict], source: str) -> dict:
+    """计算 SMA-7 均线和次日线性回归预测。"""
     for i in range(len(trends)):
-        window = [t["avg_unit_price"] for t in trends[max(0, i - 2):i + 1] if t["avg_unit_price"]]
-        trends[i]["sma_3"] = round(sum(window) / len(window), 2) if window else None
+        window = [t["avg_unit_price"] for t in trends[max(0, i - 6):i + 1] if t["avg_unit_price"]]
+        trends[i]["sma_7"] = round(sum(window) / len(window), 2) if window else None
 
-    return {"trends": trends, "source": source}
+    next_date, next_price = _predict_next_day(trends)
+    return {
+        "trends": trends,
+        "source": source,
+        "prediction_date": next_date,
+        "predicted_price": next_price,
+    }
+
+
+def _predict_next_day(trends: list[dict]) -> tuple[str | None, float | None]:
+    """简单线性回归预测次日价格。
+
+    规则：历史数据少于 3 天时不预测（线性拟合无意义）。
+    """
+    prices = [t["avg_unit_price"] for t in trends if t["avg_unit_price"]]
+    if len(prices) < 3:
+        return None, None
+
+    window = trends[-PREDICTION_WINDOW:]
+    x = np.arange(len(window), dtype=float)
+    y = np.array([t["avg_unit_price"] for t in window], dtype=float)
+
+    n = len(x)
+    x_mean = x.mean()
+    y_mean = y.mean()
+    denom = ((x - x_mean) ** 2).sum()
+    slope = ((x - x_mean) * (y - y_mean)).sum() / denom if denom != 0 else 0.0
+    intercept = y_mean - slope * x_mean
+    predicted_raw = round(float(slope * len(prices) + intercept), 2)
+
+    last_price = prices[-1]
+    if last_price > 0:
+        predicted_raw = max(predicted_raw, last_price * 0.7)
+        predicted_raw = min(predicted_raw, last_price * 1.3)
+
+    last_date_str = window[-1]["date"]
+    last_date = date.fromisoformat(last_date_str)
+    next_date = last_date + timedelta(days=1)
+
+    return next_date.isoformat(), predicted_raw

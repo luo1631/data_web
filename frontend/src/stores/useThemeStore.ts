@@ -1,46 +1,65 @@
 import { create } from "zustand";
+import { useEffect } from "react";
 
-type Theme = "light" | "dark";
+type ThemePref = "light" | "dark" | "system";
 type Lang = "zh" | "en";
 
 interface ThemeState {
-  theme: Theme;
+  theme: ThemePref;           // 用户偏好
+  resolved: "light" | "dark"; // 实际生效的主题
   lang: Lang;
-  toggleTheme: () => void;
-  toggleLang: () => void;
+  setTheme: (t: ThemePref) => void;
+  setLang: (l: Lang) => void;
 }
 
-const applyTheme = (theme: Theme) => {
-  document.documentElement.classList.toggle("dark", theme === "dark");
-};
+function resolveTheme(pref: ThemePref): "light" | "dark" {
+  if (pref === "system") {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  return pref;
+}
 
-const getInitialTheme = (): Theme => {
-  const stored = localStorage.getItem("theme");
-  if (stored === "dark" || stored === "light") return stored;
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-};
+function applyDarkClass(isDark: boolean) {
+  document.documentElement.classList.toggle("dark", isDark);
+}
 
-const getInitialLang = (): Lang => {
-  return (localStorage.getItem("lang") as Lang) || "zh";
-};
+const stored = (localStorage.getItem("theme") as ThemePref) || "system";
+const storedLang = (localStorage.getItem("lang") as Lang) || "zh";
 
-const initialTheme = getInitialTheme();
-applyTheme(initialTheme);
+const initialResolved = resolveTheme(stored);
+applyDarkClass(initialResolved === "dark");
 
-export const useThemeStore = create<ThemeState>((set, get) => ({
-  theme: initialTheme,
-  lang: getInitialLang(),
+export const useThemeStore = create<ThemeState>((set) => ({
+  theme: stored,
+  resolved: initialResolved,
+  lang: storedLang,
 
-  toggleTheme: () => {
-    const next = get().theme === "light" ? "dark" : "light";
-    localStorage.setItem("theme", next);
-    applyTheme(next);
-    set({ theme: next });
+  setTheme: (t) => {
+    localStorage.setItem("theme", t);
+    const r = resolveTheme(t);
+    applyDarkClass(r === "dark");
+    set({ theme: t, resolved: r });
   },
 
-  toggleLang: () => {
-    const next = get().lang === "zh" ? "en" : "zh";
-    localStorage.setItem("lang", next);
-    set({ lang: next });
+  setLang: (l) => {
+    localStorage.setItem("lang", l);
+    set({ lang: l });
   },
 }));
+
+/** 监听系统主题变化（仅在 theme === "system" 时生效） */
+export function useSystemThemeListener() {
+  const theme = useThemeStore((s) => s.theme);
+
+  useEffect(() => {
+    if (theme !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = () => {
+      const r = resolveTheme("system");
+      applyDarkClass(r === "dark");
+      useThemeStore.setState({ resolved: r });
+    };
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [theme]);
+}

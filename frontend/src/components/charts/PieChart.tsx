@@ -10,11 +10,12 @@ interface Props {
   roseType?: boolean;
 }
 
-const COLORS = ["#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de", "#3ba272", "#fc8452", "#9a60b4"];
+// Shopify 衍生色系: 深青 → 中青 → 灰青 → 冷灰 → 浅紫灰 → 暖灰 → 浅灰 → 中灰
+const COLORS = ["#1e2c31", "#3d5a62", "#6b838a", "#9dabad", "#bdbdca", "#9797a2", "#d4d4d8", "#71717a"];
 
 export default function PieChart({ title, data, height = 280, roseType = false }: Props) {
-  const { theme } = useThemeStore();
-  const isDark = theme === "dark";
+  const resolved = useThemeStore((s) => s.resolved);
+  const isDark = resolved === "dark";
 
   const option = {
     title: title ? { text: title, left: "center", textStyle: { fontSize: 13, color: isDark ? "#e0e0e0" : "#333" } } : undefined,

@@ -232,6 +232,45 @@ def normalize_floor_level(text: str | None) -> str | None:
     return text
 
 
+# ── 列表页数据清洗 ───────────────────────────────
+
+def clean_list_page_data(data: dict) -> dict:
+    """将列表页解析结果直接清洗为 DB 就绪 dict（不爬详情页）。
+
+    列表页已含：title, total_price, area, room/hall/bathroom,
+    orientation, decoration, floor_level, community_name。
+    单价可由总价÷面积推算。
+    """
+    total_price = data.get("total_price")
+    area = data.get("area")
+
+    # 推算单价
+    unit_price = None
+    if total_price is not None and area is not None and area > 0:
+        unit_price = round(total_price * 10000 / area, 2)
+
+    return {
+        "total_price": total_price,
+        "unit_price": unit_price,
+        "area": area,
+        "room_count": data.get("room_count"),
+        "hall_count": data.get("hall_count"),
+        "bathroom_count": data.get("bathroom_count"),
+        "floor_level": normalize_floor_level(data.get("floor_level")),
+        "total_floors": None,
+        "orientation": normalize_orientation(data.get("orientation")),
+        "decoration": normalize_decoration(data.get("decoration")),
+        "building_type": None,
+        "building_structure": None,
+        "has_elevator": None,
+        "community_name": data.get("community_name"),
+        "community_address": None,
+        "listing_date": None,
+        "listing_age_days": None,
+        "title": data.get("title"),
+    }
+
+
 # ── 异常值检测 ───────────────────────────────────
 
 def is_price_outlier(

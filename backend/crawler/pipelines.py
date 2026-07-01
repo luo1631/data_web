@@ -41,10 +41,6 @@ class DatabasePipeline:
 
     async def __aenter__(self) -> "DatabasePipeline":
         self._write_session = self._factory()
-        # 启用 WAL mode + 设置 busy_timeout
-        async with self._write_session.begin():
-            await self._write_session.execute(text("PRAGMA journal_mode=WAL"))
-            await self._write_session.execute(text("PRAGMA busy_timeout=30000"))
         return self
 
     async def __aexit__(self, *args) -> None:
@@ -192,6 +188,17 @@ class DatabasePipeline:
             values["error_message"] = error_message
         await self.update_crawl_task(task_id, **values)
 
+    # ── Batch commit ──────────────────────────────────
+
+    async def flush(self) -> None:
+        """提交当前 session 中所有未提交的写入。
+
+        爬取过程中按页调用，将 60 条房源的写入合并为一次事务，
+        消除 per-row commit 的 WAL 争用开销。
+        """
+        async with self._write_lock:
+            await self._write_session.commit()
+
     # ── Listing ──────────────────────────────────────
 
     async def upsert_listing(
@@ -204,30 +211,17 @@ class DatabasePipeline:
         batch_id: int,
         source_url: str,
     ) -> tuple[int, str]:
-        """插入或更新房源。
+        """插入或更新房源（不提交 — 由页面级 flush() 统一提交）。
 
         三种情况:
           - external_id 不存在 → INSERT → ('new')
           - external_id 存在 + MD5 相同 → 更新 last_seen_at → ('unchanged')
           - external_id 存在 + MD5 不同 → 更新全部字段 + 记录价格历史 → ('updated')
-
-        Args:
-            data: clean_listing() 返回的 dict
-            external_id: 房天下房源 ID
-            district_id: 区县 DB ID
-            community_id: 小区 DB ID（可为 None）
-            md5_hash: 关键字段 MD5
-            batch_id: 爬取批次 ID
-            source_url: 原始详情页 URL
-
-        Returns:
-            (listing_id, action) — action ∈ {'new', 'updated', 'unchanged'}
         """
         existing = await self._get_existing_listing(external_id)
 
         if existing:
             if not self._is_changed(existing, md5_hash):
-                # 无变化：仅更新 last_seen_at
                 async with self._write_lock:
                     await self._write_session.execute(
                         update(Listing)
@@ -237,17 +231,22 @@ class DatabasePipeline:
                             last_updated_at=func_now(),
                         )
                     )
-                    await self._write_session.commit()
                 return existing.id, "unchanged"
 
-            # 有变化：记录价格历史 + 更新
-            if (
-                existing.total_price != data.get("total_price")
-                or existing.unit_price != data.get("unit_price")
-            ):
-                await self._record_price_change(existing, data)
-
+            # 有变化：记录价格历史 + 更新（同一个锁范围内完成）
             async with self._write_lock:
+                if (
+                    existing.total_price != data.get("total_price")
+                    or existing.unit_price != data.get("unit_price")
+                ):
+                    self._write_session.add(
+                        PriceHistory(
+                            listing_id=existing.id,
+                            total_price=existing.total_price,
+                            unit_price=existing.unit_price,
+                            record_date=date.today(),
+                        )
+                    )
                 values = _build_listing_values(
                     data, district_id, community_id, md5_hash, batch_id, source_url
                 )
@@ -258,7 +257,6 @@ class DatabasePipeline:
                     .where(Listing.id == existing.id)
                     .values(**values)
                 )
-                await self._write_session.commit()
             return existing.id, "updated"
 
         # 全新房源
@@ -270,7 +268,7 @@ class DatabasePipeline:
         )
         async with self._write_lock:
             self._write_session.add(listing)
-            await self._write_session.commit()
+            await self._write_session.flush()       # 获取 autoincrement ID，不提交
             await self._write_session.refresh(listing)
             return listing.id, "new"
 
@@ -285,34 +283,13 @@ class DatabasePipeline:
     def _is_changed(existing: Listing, new_md5: str) -> bool:
         return (existing.md5_hash or "") != new_md5
 
-    async def _record_price_change(
-        self, existing: Listing, new_data: dict
-    ) -> None:
-        """记录价格历史变更（仅 add，不单独 commit）。"""
-        new_total = new_data.get("total_price")
-        new_unit = new_data.get("unit_price")
-
-        if existing.total_price == new_total and existing.unit_price == new_unit:
-            return
-
-        async with self._write_lock:
-            self._write_session.add(
-                PriceHistory(
-                    listing_id=existing.id,
-                    total_price=existing.total_price,
-                    unit_price=existing.unit_price,
-                    record_date=date.today(),
-                )
-            )
-            # 不在这里 commit — 由调用者的 commit 统一提交
-
     # ── Community ─────────────────────────────────────
 
     async def upsert_community(
         self, name: str, district_id: int, address: str | None,
         lng: float | None = None, lat: float | None = None,
     ) -> int:
-        """查找或创建小区记录（带写锁保护，防并发重复）。"""
+        """查找或创建小区记录（不提交 — 由页面级 flush() 统一提交）。"""
         if not name:
             name = "未知小区"
 
@@ -325,7 +302,6 @@ class DatabasePipeline:
             )
             existing = result.scalar_one_or_none()
             if existing is not None:
-                # 更新地址和坐标（如果提供了新数据）
                 if address or lng is not None:
                     update_vals = {}
                     if address:
@@ -338,22 +314,21 @@ class DatabasePipeline:
                         await self._write_session.execute(
                             update(Community).where(Community.id == existing).values(**update_vals)
                         )
-                        await self._write_session.commit()
                 return existing
 
             self._write_session.add(
                 Community(name=name, district_id=district_id, address=address,
                           lng=lng, lat=lat)
             )
-            await self._write_session.commit()
+            await self._write_session.flush()       # 获取 autoincrement ID，不提交
+
             result = await self._write_session.execute(
                 select(Community.id).where(
                     Community.name == name,
                     Community.district_id == district_id,
                 ).order_by(Community.id.desc()).limit(1)
             )
-            cid = result.scalar_one()
-            return cid
+            return result.scalar_one()
 
     # ── Remove detection ──────────────────────────
 

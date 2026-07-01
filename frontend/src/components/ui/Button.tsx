@@ -13,17 +13,19 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantClasses: Record<Variant, string> = {
   primary:
-    "bg-[var(--color-primary)] text-[var(--color-text-white)] hover:opacity-90",
+    "bg-[var(--color-brand)] text-[var(--color-text-inverse)] hover:bg-[var(--color-brand-hover)] active:bg-[var(--color-brand-pressed)] active:scale-[0.98]",
   secondary:
-    "bg-[var(--color-accent)] text-[var(--color-text)] hover:opacity-80",
-  danger: "bg-red-600 text-white hover:bg-red-700",
-  ghost: "bg-transparent hover:bg-black/5 dark:hover:bg-white/10",
+    "bg-[var(--color-accent-bg)] text-[var(--color-text-primary)] hover:bg-[var(--color-border)] active:bg-[var(--color-border)] active:scale-[0.98]",
+  danger:
+    "bg-[var(--color-danger)] text-white hover:opacity-90 active:opacity-80 active:scale-[0.98]",
+  ghost:
+    "bg-transparent text-[var(--color-text-secondary)] hover:bg-[var(--color-accent-bg)] hover:text-[var(--color-text-primary)] active:bg-[var(--color-border)]",
 };
 
 const sizeClasses: Record<Size, string> = {
-  sm: "px-2.5 py-1 text-xs",
-  md: "px-4 py-2 text-sm",
-  lg: "px-6 py-3 text-base",
+  sm: "px-3 py-1.5 text-xs gap-1.5",
+  md: "px-4 py-2 text-sm gap-2",
+  lg: "px-6 py-2.5 text-base gap-2",
 };
 
 export default function Button({
@@ -38,7 +40,10 @@ export default function Button({
   return (
     <button
       className={clsx(
-        "inline-flex items-center justify-center gap-2 rounded font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
+        "inline-flex items-center justify-center rounded-[var(--radius-sm)] font-medium",
+        "transition-all duration-[var(--duration-fast)] ease-[var(--ease-out)]",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]/30 focus-visible:ring-offset-2",
+        "disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100",
         variantClasses[variant],
         sizeClasses[size],
         className,

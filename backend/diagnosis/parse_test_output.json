@@ -1,0 +1,68 @@
+[
+  {
+    "house_id": "3_205197287",
+    "title": "可以大谈价 精装房 提包入住 来福士广场",
+    "total_price": 250.0,
+    "unit_price": 27173.0,
+    "area": 92.0,
+    "orientation": "西北",
+    "building_type": "中层",
+    "community_name": "重庆来福士住宅",
+    "community_address": "朝天门 朝天门广场",
+    "decoration": "精装",
+    "floor_level": "中层",
+    "total_floors": 47
+  },
+  {
+    "house_id": "3_205197299",
+    "title": "看江景 精装房 提包入住 来福士广场",
+    "total_price": 270.0,
+    "unit_price": 22717.0,
+    "area": 118.85,
+    "orientation": "南",
+    "building_type": "低层",
+    "community_name": "重庆来福士住宅",
+    "community_address": "朝天门 朝天门广场",
+    "decoration": "精装",
+    "total_floors": 47
+  },
+  {
+    "house_id": "3_205196142",
+    "title": "精装大3房 看江景 提包入住 协信公馆 地铁站商业街",
+    "total_price": 206.0,
+    "unit_price": 14144.0,
+    "area": 145.64,
+    "orientation": "南",
+    "building_type": "高层",
+    "community_name": "协信公馆",
+    "community_address": "解放碑 胜利路132号",
+    "decoration": "精装",
+    "floor_level": "高层",
+    "total_floors": 41
+  },
+  {
+    "house_id": "3_205196127",
+    "title": "价格可以大谈 没入住过 地铁站商业都有 协信公馆",
+    "total_price": 192.0,
+    "unit_price": 13521.0,
+    "area": 142.0,
+    "orientation": "南",
+    "building_type": "低层",
+    "community_name": "协信公馆",
+    "community_address": "解放碑 胜利路132号",
+    "total_floors": 49
+  },
+  {
+    "house_id": "3_205196132",
+    "title": "价格可谈 精装房 提包入住 协信公馆",
+    "total_price": 205.0,
+    "unit_price": 14041.0,
+    "area": 146.0,
+    "orientation": "东",
+    "community_name": "协信公馆",
+    "community_address": "解放碑 胜利路132号",
+    "decoration": "精装",
+    "floor_level": "底层",
+    "total_floors": 41
+  }
+]

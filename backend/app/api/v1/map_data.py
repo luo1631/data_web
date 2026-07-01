@@ -33,7 +33,7 @@ async def district_prices(db: AsyncSession = Depends(get_db)):
                 func.count(Listing.id).label("cnt"),
             )
             .join(Listing, Listing.district_id == District.id)
-            .where(Listing.status == "active", Listing.unit_price.isnot(None))
+            .where(Listing.status == "active", Listing.unit_price.isnot(None), Listing.unit_price > 0)
             .group_by(District.name)
             .order_by(func.avg(Listing.unit_price).desc())
         )

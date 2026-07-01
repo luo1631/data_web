@@ -57,6 +57,12 @@ def build_listing_query(filters: ListingFilter) -> Select:
     if filters.max_price is not None:
         conditions.append(Listing.total_price <= filters.max_price)
 
+    if filters.min_unit_price is not None:
+        conditions.append(Listing.unit_price >= filters.min_unit_price)
+
+    if filters.max_unit_price is not None:
+        conditions.append(Listing.unit_price <= filters.max_unit_price)
+
     if filters.min_area is not None:
         conditions.append(Listing.area >= filters.min_area)
 

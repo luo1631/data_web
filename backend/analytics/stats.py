@@ -1,26 +1,34 @@
 """
 描述性统计分析模块：均价、中位数、分布、区县排名、户型/装修/面积/房龄分布。
 
-含简单 TTL 内存缓存（60s），避免高频请求重复聚合计算。
+含简单 TTL 内存缓存（60s），LRU 淘汰，避免高频请求重复聚合计算。
 """
 
 import statistics
 import time
+from collections import OrderedDict
 from typing import Sequence
 
 from sqlalchemy import func, select, and_, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# ── 简易 TTL 缓存（无外部依赖）──
-_OVERVIEW_CACHE: dict[str, tuple[float, dict]] = {}
+# ── LRU TTL 缓存（无外部依赖）──
+_OVERVIEW_CACHE: OrderedDict[str, tuple[float, dict]] = OrderedDict()
 _COMPARE_CACHE: list = [0, []]  # [timestamp, data] 可变列表引用
 _CACHE_TTL = 60  # 秒
+_CACHE_MAX_SIZE = 50
+
+
+def _evict_lru(cache: OrderedDict, max_size: int) -> None:
+    """LRU 淘汰：超出 max_size 时移除最旧条目。"""
+    while len(cache) > max_size:
+        cache.popitem(last=False)
 
 
 async def get_overview_stats(
     db: AsyncSession, district_id: int | None = None
 ) -> dict:
-    """全量概览统计（60s TTL 缓存）。"""
+    """全量概览统计（60s TTL 缓存，LRU 淘汰）。"""
     cache_key = f"overview_{district_id}"
     now = time.time()
     cached = _OVERVIEW_CACHE.get(cache_key)
@@ -28,9 +36,10 @@ async def get_overview_stats(
         return cached[1]
 
     result = await _compute_overview_stats(db, district_id)
+    # LRU: 先删旧 key 再插入（更新位置）
+    _OVERVIEW_CACHE.pop(cache_key, None)
     _OVERVIEW_CACHE[cache_key] = (now, result)
-    # 清理过期条目
-    _OVERVIEW_CACHE.clear() if len(_OVERVIEW_CACHE) > 50 else None
+    _evict_lru(_OVERVIEW_CACHE, _CACHE_MAX_SIZE)
     return result
 
 
@@ -90,27 +99,29 @@ async def _compute_overview_stats(
         base.append(Listing.district_id == district_id)
     cond = and_(*base)
 
-    # 基础聚合
+    # 基础聚合（过滤空值和零值脏数据）
     agg = await db.execute(
         select(
             func.count(Listing.id).label("cnt"),
-            func.avg(Listing.total_price).label("avg_t"),
-            func.avg(Listing.unit_price).label("avg_u"),
-            func.avg(Listing.area).label("avg_a"),
+            func.avg(Listing.total_price).filter(Listing.total_price > 0).label("avg_t"),
+            func.avg(Listing.unit_price).filter(Listing.unit_price > 0).label("avg_u"),
+            func.avg(Listing.area).filter(Listing.area > 0).label("avg_a"),
+            func.count(Listing.id).filter(Listing.unit_price.isnot(None), Listing.unit_price > 0).label("valid_u"),
+            func.count(Listing.id).filter(Listing.total_price.isnot(None), Listing.total_price > 0).label("valid_t"),
         ).where(cond)
     )
     row = agg.one()
     total = row.cnt or 0
 
-    # 全量价格数组（用于中位数/标准差）
+    # 全量价格数组（用于中位数/标准差），排除 None 和 ≤0
     prices = await db.execute(
         select(Listing.total_price, Listing.unit_price, Listing.area).where(cond)
     )
     t_vals, u_vals, a_vals = [], [], []
     for tp, up, ar in prices.all():
-        if tp is not None: t_vals.append(float(tp))
-        if up is not None: u_vals.append(float(up))
-        if ar is not None: a_vals.append(float(ar))
+        if tp is not None and tp > 0: t_vals.append(float(tp))
+        if up is not None and up > 0: u_vals.append(float(up))
+        if ar is not None and ar > 0: a_vals.append(float(ar))
 
     # ── 价格分布 ──
     price_dist = await _bin_count(db, Listing.total_price, PRICE_BINS, base, total)
@@ -135,12 +146,32 @@ async def _compute_overview_stats(
     # ── 朝向分布 ──
     orient_dist = await _categorical_dist(db, Listing.orientation, cond, total)
 
-    # ── 区县排名 ──
+    # ── 城市/郊区分组统计 ──
+    urban_suburb_rows = await db.execute(
+        select(
+            District.is_urban,
+            func.count(Listing.id).label("cnt"),
+            func.avg(Listing.unit_price).filter(Listing.unit_price > 0).label("avg_u"),
+        ).join(Listing, Listing.district_id == District.id)
+        .where(cond, District.is_urban.isnot(None))
+        .group_by(District.is_urban)
+    )
+    urban_cnt, urban_avg = 0, None
+    suburb_cnt, suburb_avg = 0, None
+    for is_u, cnt, au in urban_suburb_rows.all():
+        if is_u:
+            urban_cnt = cnt
+            urban_avg = round(float(au), 2) if au else None
+        else:
+            suburb_cnt = cnt
+            suburb_avg = round(float(au), 2) if au else None
+
+    # ── 区县排名（过滤零值脏数据）──
     rank_rows = await db.execute(
         select(
             District.name,
             func.count(Listing.id).label("cnt"),
-            func.avg(Listing.unit_price).label("avg_u"),
+            func.avg(Listing.unit_price).filter(Listing.unit_price > 0).label("avg_u"),
         ).join(Listing, Listing.district_id == District.id).where(cond).group_by(District.name).order_by(func.count(Listing.id).desc())
     )
     district_ranking = [
@@ -150,6 +181,8 @@ async def _compute_overview_stats(
 
     return {
         "total_listings": total,
+        "valid_price_count": row.valid_u or 0,
+        "valid_total_count": row.valid_t or 0,
         "avg_total_price": round(float(row.avg_t), 2) if row.avg_t else None,
         "median_total_price": round(statistics.median(t_vals), 2) if t_vals else None,
         "avg_unit_price": round(float(row.avg_u), 2) if row.avg_u else None,
@@ -158,6 +191,11 @@ async def _compute_overview_stats(
         "median_area": round(statistics.median(a_vals), 2) if a_vals else None,
         "total_price_std": round(statistics.stdev(t_vals), 2) if len(t_vals) > 1 else None,
         "unit_price_std": round(statistics.stdev(u_vals), 2) if len(u_vals) > 1 else None,
+        # 城市/郊区分组
+        "urban_count": urban_cnt,
+        "urban_avg_unit_price": urban_avg,
+        "suburb_count": suburb_cnt,
+        "suburb_avg_unit_price": suburb_avg,
         "district_ranking": district_ranking,
         "price_distribution": price_dist,
         "area_distribution": area_dist,
@@ -169,7 +207,11 @@ async def _compute_overview_stats(
 
 
 async def _compute_district_compare(db: AsyncSession) -> list[dict]:
-    """区县对比分析 — 每个区县的均价、中位数、标准差、房源数。（内部实现）"""
+    """区县对比分析 — 每个区县的均价、中位数、标准差、房源数。（内部实现）
+
+    优化: 一次查询获取所有 (district_name, unit_price) 对，Python 侧分组计算
+          中位数和标准差，避免 N+1 查询。
+    """
     rows = await db.execute(
         select(
             District.name,
@@ -183,17 +225,20 @@ async def _compute_district_compare(db: AsyncSession) -> list[dict]:
         .order_by(func.avg(Listing.unit_price).desc())
     )
 
+    # 一次查询获取所有区县的 unit_price 对
+    all_prices = await db.execute(
+        select(District.name, Listing.unit_price)
+        .join(Listing, Listing.district_id == District.id)
+        .where(Listing.status == "active", Listing.unit_price.isnot(None))
+    )
+    price_map: dict[str, list[float]] = {}
+    for name, up in all_prices.all():
+        if up is not None:
+            price_map.setdefault(name, []).append(float(up))
+
     result = []
     for name, is_urban, cnt, avg_t, avg_u in rows.all():
-        # 每区县中位数单独查
-        prices = await db.execute(
-            select(Listing.unit_price).where(
-                Listing.district_id == District.id,
-                District.name == name,
-                Listing.status == "active",
-            ).join(District)
-        )
-        vals = [float(p[0]) for p in prices.all() if p[0] is not None]
+        vals = price_map.get(name, [])
         result.append({
             "name": name,
             "is_urban": bool(is_urban) if is_urban is not None else True,

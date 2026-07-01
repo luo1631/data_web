@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 from crawler.fetcher import Fetcher
 from crawler.engine import CrawlEngine
-from crawler.constants import LIST_CONCURRENCY, DETAIL_CONCURRENCY
+from crawler.constants import LIST_CONCURRENCY
 
 
 class TestRateLimiting:
@@ -42,7 +42,6 @@ class TestConcurrencyControl:
         """信号量初始值正确"""
         engine = CrawlEngine(None)
         assert engine._list_sem._value == LIST_CONCURRENCY
-        assert engine._detail_sem._value == DETAIL_CONCURRENCY
 
     @pytest.mark.asyncio
     async def test_concurrent_acquire(self):
@@ -89,12 +88,11 @@ class TestFetcherLifecycle:
         assert f._client is None
 
     @pytest.mark.asyncio
-    async def test_user_agent_random(self):
-        """UA 应随机选择（至少不总是同一个）"""
-        async with Fetcher() as f:
-            uas = [f._rotate_ua() for _ in range(20)]
-            unique = len(set(uas))
-            assert unique > 1  # 不应全是同一个
+    async def test_user_agent_pool_diverse(self):
+        """UA 池应有足够多样性"""
+        from crawler.constants import USER_AGENTS
+        assert len(USER_AGENTS) >= 5
+        assert len(set(USER_AGENTS)) == len(USER_AGENTS)  # 无重复
 
 
 class TestRetryLogic:

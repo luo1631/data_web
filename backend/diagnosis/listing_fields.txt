@@ -1,0 +1,11 @@
+=== KEY FIELDS ===
+title: N/A
+total_price: N/A
+unit_price: N/A
+area: N/A
+building_type: N/A
+community: N/A
+address: N/A
+house_id: N/A
+
+=== FULL TEXT ===

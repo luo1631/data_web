@@ -21,16 +21,40 @@ logger = logging.getLogger("scheduler")
 
 # ── 公开入口（供 main.py 的 APScheduler 调用）──
 
+async def run_periodic_update():
+    """每 6 小时执行：增量爬取 + 龄期刷新。
+
+    先跑龄期更新（轻量 SQL），再做增量爬取（网络 IO）。
+    如果上次增量距今不足 6 小时的批次还在，跳过本次爬取。
+    """
+    logger.info("[Scheduler] 定时更新任务触发 (6h)")
+
+    # 1. 龄期刷新
+    await run_daily_listing_age_update()
+
+    # 2. 增量爬取
+    await run_weekly_incremental_crawl()
+
+
+# ── 公开入口（供 main.py 的 APScheduler 调用）──
+
 async def run_weekly_incremental_crawl():
     """每周增量爬取任务入口。
 
     执行流程:
+      0. 检查是否有用户手动爬取运行中 → 跳过（防止 SQLite 写冲突）
       1. 检查是否有 running 中的增量批次 → 跳过（防止重复）
       2. 如果有 stopped/failed 的未完成批次 → 恢复继续
       3. 否则创建新的增量批次
       4. 运行 CrawlEngine（每个区县 1-2 页，检查新挂牌房源）
     """
     logger.info("[Scheduler] 每周增量爬取任务触发")
+
+    # 0. 与用户触发的全量爬取互斥（共用同一个 SQLite WAL）
+    from app.services.crawl_service import is_crawling
+    if is_crawling():
+        logger.info("[Scheduler] 用户手动爬取运行中，跳过本次增量")
+        return {"skipped": True, "reason": "manual crawl in progress"}
 
     async with async_session() as db:
         # 1. 检查是否有 running 中的增量批次（互斥保护）
@@ -71,15 +95,13 @@ async def run_weekly_incremental_crawl():
                 await db2.commit()
 
             result = await engine.crawl_all(
-                district_ids=None,
                 batch_type="incremental",
-                max_pages=2,  # 增量仅取前 2 页（最新挂牌）
+                max_pages=2,
                 pre_created_batch_id=resume.id,
             )
         else:
             logger.info("[Scheduler] 创建新的增量批次")
             result = await engine.crawl_all(
-                district_ids=None,
                 batch_type="incremental",
                 max_pages=2,
             )

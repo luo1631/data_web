@@ -1,41 +1,46 @@
-import { useState } from "react";
-import { RotateCcw } from "lucide-react";
+import { useState, useMemo, useEffect } from "react";
+import { useLocation } from "react-router-dom";
+import { RotateCcw, RefreshCw, ArrowUpDown } from "lucide-react";
 import Button from "../components/ui/Button";
+import Input from "../components/ui/Input";
 import Select from "../components/ui/Select";
 import Table, { type Column } from "../components/ui/Table";
 import { useThemeStore } from "../stores/useThemeStore";
+import { useSettingsStore } from "../stores/useSettingsStore";
 import { useListings } from "../hooks/useListings";
-import { useDistricts } from "../hooks/useAnalytics";
+import { DISTRICTS } from "../constants/districts";
 import { t } from "../i18n";
 import type { Listing } from "../types/common";
 
-const DECORATION_OPTS = [
-  { value: "", label: "全部" },
-  { value: "毛坯", label: "毛坯" },
-  { value: "简装", label: "简装" },
-  { value: "精装", label: "精装" },
-  { value: "豪装", label: "豪装" },
-];
-
-const ORIENTATION_OPTS = [
-  { value: "", label: "全部" },
-  { value: "南", label: "南" },
-  { value: "北", label: "北" },
-  { value: "南北", label: "南北" },
-  { value: "东南", label: "东南" },
-  { value: "西南", label: "西南" },
-];
+const DECORATION_VALUES = ["毛坯", "简装", "精装", "豪装"] as const;
+const ORIENTATION_VALUES = ["南", "北", "南北", "东南", "西南"] as const;
+const ROOM_OPTIONS = [1, 2, 3, 4, 5, 6];
 
 export default function DataStoragePage() {
-  const { lang } = useThemeStore();
-  const { districts } = useDistricts();
-  const { data, total, loading, filters, updateFilter, updateFilters, setPage } = useListings();
-  const [sortKey, setSortKey] = useState("last_updated_at");
+  const lang = useThemeStore((s) => s.lang);
+  const defaultPageSize = useSettingsStore((s) => s.defaultPageSize);
+  const { data, total, loading, filters, updateFilter, updateFilters, setPage, reload } = useListings({ page_size: defaultPageSize });
+  const [sortKey, setSortKey] = useState("id");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  const decorationOpts = useMemo(() => [
+    { value: "", label: t("storage.all", lang) },
+    ...DECORATION_VALUES.map((v) => ({ value: v, label: v })),
+  ], [lang]);
+
+  const orientationOpts = useMemo(() => [
+    { value: "", label: t("storage.all", lang) },
+    ...ORIENTATION_VALUES.map((v) => ({ value: v, label: v })),
+  ], [lang]);
+
+  const roomOpts = useMemo(() => [
+    { value: "", label: t("storage.all", lang) },
+    ...ROOM_OPTIONS.map((v) => ({ value: String(v), label: `${v}${t("storage.roomSep", lang)}` })),
+  ], [lang]);
 
   const districtOpts = [
     { value: "", label: t("storage.allDistricts", lang) },
-    ...districts.map((d) => ({ value: String(d.id), label: d.name })),
+    ...DISTRICTS.map((d) => ({ value: String(d.id), label: d.name })),
   ];
 
   const handleSort = (key: string, dir: "asc" | "desc") => {
@@ -45,20 +50,39 @@ export default function DataStoragePage() {
   };
 
   const handleReset = () => {
-    setSortKey("last_updated_at");
+    setSortKey("id");
     setSortDir("desc");
     updateFilters({
       district_id: undefined,
       min_price: undefined, max_price: undefined,
+      min_unit_price: undefined, max_unit_price: undefined,
       min_area: undefined, max_area: undefined,
       room_count: undefined, decoration: undefined,
       orientation: undefined, keyword: undefined,
-      sort_by: "last_updated_at", order: "desc",
+      sort_by: "id", order: "desc",
     });
   };
 
+  const location = useLocation();
+  useEffect(() => {
+    if (location.pathname === "/storage") reload();
+  }, [location.pathname]); // eslint-disable-line
+
+  const toggleSortDir = () => {
+    const next = sortDir === "desc" ? "asc" : "desc";
+    setSortDir(next);
+    updateFilter("order", next as any);
+  };
+
   const columns: Column<Listing>[] = [
-    { key: "external_id", header: t("storage.columns.id", lang), width: "100px" },
+    {
+      key: "_row", header: "#", width: "50px",
+      render: (_r, idx) => (
+        <span className="text-[var(--color-text-tertiary)] tabular-nums">
+          {(filters.page! - 1) * (filters.page_size ?? 30) + idx + 1}
+        </span>
+      ),
+    },
     {
       key: "title", header: t("storage.columns.title", lang), width: "200px",
       render: (r) => (
@@ -74,12 +98,12 @@ export default function DataStoragePage() {
     {
       key: "total_price", header: t("storage.columns.totalPrice", lang),
       sortable: true, width: "90px",
-      render: (r) => r.total_price != null ? `${r.total_price}万` : "-",
+      render: (r) => r.total_price != null ? <span className="font-medium">{r.total_price}{t("storage.priceUnit", lang)}</span> : "-",
     },
     {
       key: "unit_price", header: t("storage.columns.unitPrice", lang),
       sortable: true, width: "100px",
-      render: (r) => r.unit_price != null ? r.unit_price.toLocaleString() : "-",
+      render: (r) => r.unit_price != null ? <span className="font-medium">{r.unit_price.toLocaleString()}</span> : "-",
     },
     {
       key: "area", header: t("storage.columns.area", lang),
@@ -90,88 +114,119 @@ export default function DataStoragePage() {
       key: "roomLayout", header: t("storage.columns.roomLayout", lang), width: "70px",
       render: (r) => {
         const parts = [r.room_count, r.hall_count, r.bathroom_count].filter((x) => x != null);
-        return parts.length > 0 ? parts.join("室") : "-";
+        return parts.length > 0 ? parts.join(t("storage.roomSep", lang)) : "-";
       },
     },
     { key: "floor_level", header: t("storage.columns.floorLevel", lang), width: "70px" },
     { key: "orientation", header: t("storage.columns.orientation", lang), width: "60px" },
     { key: "decoration", header: t("storage.columns.decoration", lang), width: "60px" },
-    {
-      key: "listing_date", header: t("storage.columns.listingDate", lang),
-      sortable: true, width: "100px",
-      render: (r) => r.listing_date ?? "-",
-    },
     { key: "status", header: t("storage.columns.status", lang), width: "60px" },
   ];
 
   return (
-    <div className="h-full flex flex-col gap-4">
-      <h1 className="text-2xl font-semibold">{t("storage.title", lang)}</h1>
+    <div className="h-full flex flex-col gap-8">
 
       {/* 筛选栏 */}
-      <div className="flex flex-wrap items-end gap-3 rounded border border-[var(--color-accent)] p-3">
-        <Select
-          label={t("storage.district", lang)}
-          value={filters.district_id != null ? String(filters.district_id) : ""}
-          onChange={(e) => updateFilter("district_id", e.target.value ? Number(e.target.value) : undefined)}
-          options={districtOpts}
-        />
-        <InputField
-          label={t("storage.minPrice", lang)}
-          value={filters.min_price != null ? String(filters.min_price) : ""}
-          onChange={(v) => updateFilter("min_price", v ? Number(v) : undefined)}
-          type="number"
-        />
-        <InputField
-          label={t("storage.maxPrice", lang)}
-          value={filters.max_price != null ? String(filters.max_price) : ""}
-          onChange={(v) => updateFilter("max_price", v ? Number(v) : undefined)}
-          type="number"
-        />
-        <InputField
-          label={t("storage.minArea", lang)}
-          value={filters.min_area != null ? String(filters.min_area) : ""}
-          onChange={(v) => updateFilter("min_area", v ? Number(v) : undefined)}
-          type="number"
-        />
-        <InputField
-          label={t("storage.maxArea", lang)}
-          value={filters.max_area != null ? String(filters.max_area) : ""}
-          onChange={(v) => updateFilter("max_area", v ? Number(v) : undefined)}
-          type="number"
-        />
-        <InputField
-          label={t("storage.roomCount", lang)}
-          value={filters.room_count != null ? String(filters.room_count) : ""}
-          onChange={(v) => updateFilter("room_count", v ? Number(v) : undefined)}
-          type="number"
-          className="w-16"
-        />
-        <Select
-          label={t("storage.decoration", lang)}
-          value={filters.decoration ?? ""}
-          onChange={(e) => updateFilter("decoration", e.target.value || undefined)}
-          options={DECORATION_OPTS}
-        />
-        <Select
-          label={t("storage.orientation", lang)}
-          value={filters.orientation ?? ""}
-          onChange={(e) => updateFilter("orientation", e.target.value || undefined)}
-          options={ORIENTATION_OPTS}
-        />
-        <InputField
-          label={t("storage.keyword", lang)}
-          value={filters.keyword ?? ""}
-          onChange={(v) => updateFilter("keyword", v || undefined)}
-          placeholder="小区名/标题..."
-        />
-        <Button variant="ghost" size="sm" onClick={handleReset}>
-          <RotateCcw size={14} /> {t("storage.reset", lang)}
-        </Button>
+      <div
+        className="shrink-0 rounded-[var(--radius-lg)] bg-[var(--color-surface)] text-[var(--color-text-primary)] px-4 py-3 border border-[var(--color-border-light)]"
+        style={{ boxShadow: "var(--elevation-1)" }}
+      >
+        {/* 第一行：区县、装修、朝向、户型、操作 */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <Select
+            label={t("storage.district", lang)}
+            value={filters.district_id != null ? String(filters.district_id) : ""}
+            onChange={(e) => updateFilter("district_id", e.target.value ? Number(e.target.value) : undefined)}
+            options={districtOpts}
+          />
+          <Select
+            label={t("storage.decoration", lang)}
+            value={filters.decoration ?? ""}
+            onChange={(e) => updateFilter("decoration", e.target.value || undefined)}
+            options={decorationOpts}
+          />
+          <Select
+            label={t("storage.orientation", lang)}
+            value={filters.orientation ?? ""}
+            onChange={(e) => updateFilter("orientation", e.target.value || undefined)}
+            options={orientationOpts}
+          />
+          <Select
+            label={t("storage.roomCount", lang)}
+            value={filters.room_count != null ? String(filters.room_count) : ""}
+            onChange={(e) => updateFilter("room_count", e.target.value ? Number(e.target.value) : undefined)}
+            options={roomOpts}
+          />
+          <Input
+            label={t("storage.minUnitPrice", lang)} placeholder="0" className="w-28"
+            value={filters.min_unit_price != null ? String(filters.min_unit_price) : ""}
+            onChange={(e) => updateFilter("min_unit_price", e.target.value ? Number(e.target.value) : undefined)}
+            type="number"
+          />
+          <Input
+            label={t("storage.maxUnitPrice", lang)} placeholder={t("storage.unlimited", lang)} className="w-28"
+            value={filters.max_unit_price != null ? String(filters.max_unit_price) : ""}
+            onChange={(e) => updateFilter("max_unit_price", e.target.value ? Number(e.target.value) : undefined)}
+            type="number"
+          />
+          <div className="flex gap-1 ml-auto">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleSortDir}
+              title={sortDir === "desc" ? (lang === "zh" ? "当前: 降序 — 点击切换升序" : "Descending — click to switch") : (lang === "zh" ? "当前: 升序 — 点击切换降序" : "Ascending — click to switch")}
+            >
+              <ArrowUpDown size={14} />
+              {sortDir === "desc" ? "↓" : "↑"}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleReset}>
+              <RotateCcw size={14} /> {t("storage.reset", lang)}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={reload}>
+              <RefreshCw size={14} /> {t("storage.refresh", lang)}
+            </Button>
+          </div>
+        </div>
+        {/* 第二行：总价、面积、搜索 */}
+        <div className="flex items-center gap-3 mt-3 flex-wrap">
+          <Input
+            label={t("storage.minPrice", lang)} placeholder="0" className="w-24"
+            value={filters.min_price != null ? String(filters.min_price) : ""}
+            onChange={(e) => updateFilter("min_price", e.target.value ? Number(e.target.value) : undefined)}
+            type="number"
+          />
+          <Input
+            label={t("storage.maxPrice", lang)} placeholder={t("storage.unlimited", lang)} className="w-24"
+            value={filters.max_price != null ? String(filters.max_price) : ""}
+            onChange={(e) => updateFilter("max_price", e.target.value ? Number(e.target.value) : undefined)}
+            type="number"
+          />
+          <Input
+            label={t("storage.minArea", lang)} placeholder="0" className="w-24"
+            value={filters.min_area != null ? String(filters.min_area) : ""}
+            onChange={(e) => updateFilter("min_area", e.target.value ? Number(e.target.value) : undefined)}
+            type="number"
+          />
+          <Input
+            label={t("storage.maxArea", lang)} placeholder={t("storage.unlimited", lang)} className="w-24"
+            value={filters.max_area != null ? String(filters.max_area) : ""}
+            onChange={(e) => updateFilter("max_area", e.target.value ? Number(e.target.value) : undefined)}
+            type="number"
+          />
+          <Input
+            label={t("storage.keyword", lang)} className="w-32"
+            value={filters.keyword ?? ""}
+            onChange={(e) => updateFilter("keyword", e.target.value || undefined)}
+            placeholder={t("storage.keywordPlaceholder", lang)}
+          />
+        </div>
       </div>
 
       {/* 表格 */}
-      <div className="flex-1 min-h-0">
+      <div
+        className="flex-1 min-h-0 rounded-[var(--radius-lg)] bg-[var(--color-surface)] text-[var(--color-text-primary)] border border-[var(--color-border-light)] overflow-hidden"
+        style={{ boxShadow: "var(--elevation-1)" }}
+      >
         <Table
           columns={columns}
           data={data}
@@ -187,28 +242,6 @@ export default function DataStoragePage() {
           emptyText={t("storage.noData", lang)}
         />
       </div>
-
-      <div className="text-xs opacity-40">
-        {t("storage.totalRecords", lang, { total })}
-      </div>
-    </div>
-  );
-}
-
-function InputField({
-  label, value, onChange, type = "text", placeholder, className = "w-24",
-}: {
-  label: string; value: string; onChange: (v: string) => void;
-  type?: string; placeholder?: string; className?: string;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <label className="text-xs font-medium opacity-60">{label}</label>
-      <input
-        type={type} value={value} placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className={`rounded border border-[var(--color-accent)] bg-[var(--color-bg)] px-2 py-1.5 text-sm ${className}`}
-      />
     </div>
   );
 }

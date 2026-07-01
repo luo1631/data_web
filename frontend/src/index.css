@@ -2,35 +2,138 @@
 
 @theme {
   --font-sans: "Microsoft YaHei", "微软雅黑", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
-/* 亮色主题 */
+/* ═══════════════════════════════════════════════════════════
+   Design Tokens — Shopify-inspired color system
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── 亮色画布 (Light Canvas): cream + white + shade ladder ── */
 :root {
-  --color-primary: #122e8a;
-  --color-primary-bg: #f5efea;
-  --color-accent: #d9d3e8;
-  --color-text: #1a1a1a;
+  /* Canvas & Surface */
+  --color-canvas: #fbfbf5;
+  --color-surface: #ffffff;
+  --color-surface-elevated: #f5f2eb;
+
+  /* Brand */
+  --color-brand: #1e2c31;
+  --color-brand-hover: #31464d;
+  --color-brand-pressed: #0f1619;
+
+  /* Text */
+  --color-text-primary: #000000;
+  --color-text-secondary: #71717a;
+  --color-text-tertiary: #a1a1aa;
   --color-text-inverse: #ffffff;
+
+  /* Border */
+  --color-border: #e4e4e7;
+  --color-border-light: #f4f4f5;
+
+  /* Accent backgrounds */
+  --color-accent-bg: #d4d4d8;
+
+  /* Semantic */
+  --color-success: #10b981;
+  --color-danger: #ef4444;
+  --color-warning: #f59e0b;
+
+  /* ═══ 兼容别名 (旧变量名 → 新 token，不破坏现有引用) ═══ */
+  --color-primary: var(--color-surface);
+  --color-primary-bg: var(--color-brand);
+  --color-text: var(--color-text-primary);
+  --color-accent: var(--color-accent-bg);
+
+  /* ── Elevation (亮色) ── */
+  --elevation-0: none;
+  --elevation-1: 0 1px 3px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  --elevation-2: 0 8px 8px rgba(0, 0, 0, 0.06), 0 4px 4px rgba(0, 0, 0, 0.05),
+    0 2px 2px rgba(0, 0, 0, 0.05), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  --elevation-3: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+
+  /* ── Border Radius ── */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 9999px;
+
+  /* ── Animation ── */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
 }
 
-/* 暗色主题 */
+/* ── 暗色画布 (Dark Canvas): pure black + cool link tones ── */
 .dark {
-  --color-primary: #e6397c;
-  --color-primary-bg: #1a1a1d;
-  --color-accent: #301f28;
-  --color-text: #e0e0e0;
-  --color-text-inverse: #ffffff;
+  /* Canvas & Surface */
+  --color-canvas: #000000;
+  --color-surface: #0a0a0a;
+  --color-surface-elevated: #1a1a1a;
+
+  /* Brand */
+  --color-brand: #9dabad;
+  --color-brand-hover: #b7c3c4;
+  --color-brand-pressed: #7d8f90;
+
+  /* Text */
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #a1a1aa;
+  --color-text-tertiary: #71717a;
+  --color-text-inverse: #000000;
+
+  /* Border */
+  --color-border: #1e2c31;
+  --color-border-light: #1a1a1a;
+
+  /* Accent backgrounds */
+  --color-accent-bg: #1e2c31;
+
+  /* Semantic */
+  --color-success: #22c55e;
+  --color-danger: #f87171;
+  --color-warning: #fbbf24;
+
+  /* ═══ 兼容别名 (暗色覆盖) ═══ */
+  --color-primary: var(--color-surface);
+  --color-primary-bg: var(--color-brand);
+  --color-text: var(--color-text-primary);
+  --color-accent: var(--color-accent-bg);
+
+  /* ── Elevation (暗色 — inset sheen, no heavy drop shadows) ── */
+  --elevation-1: 0 1px 2px rgba(255, 255, 255, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.02);
+  --elevation-2: 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 1px 3px rgba(0, 0, 0, 0.4), 0 5px 10px rgba(0, 0, 0, 0.3);
+  --elevation-3: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Global Reset
+   ═══════════════════════════════════════════════════════════ */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-text-tertiary) transparent;
 }
 
 body {
   margin: 0;
   font-family: var(--font-sans);
-  background-color: var(--color-primary-bg);
-  color: var(--color-text);
-  transition: background-color 0.3s, color 0.3s;
+  background-color: var(--color-canvas);
+  color: var(--color-text-primary);
+  transition: background-color var(--duration-normal) var(--ease-out),
+    color var(--duration-normal) var(--ease-out);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-html, body, #root {
+html,
+body,
+#root {
   height: 100%;
   overflow: hidden;
 }

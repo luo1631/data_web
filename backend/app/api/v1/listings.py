@@ -32,6 +32,8 @@ async def list_listings(
     district_id: int | None = Query(None),
     min_price: float | None = Query(None, ge=0),
     max_price: float | None = Query(None, ge=0),
+    min_unit_price: float | None = Query(None, ge=0),
+    max_unit_price: float | None = Query(None, ge=0),
     min_area: float | None = Query(None, ge=0),
     max_area: float | None = Query(None, ge=0),
     room_count: int | None = Query(None, ge=1, le=10),
@@ -48,13 +50,15 @@ async def list_listings(
 ):
     """房源列表 — 分页 + 多条件筛选 + 排序。
 
-    支持的筛选维度: district_id、价格区间、面积区间、户型、装修、
+    支持的筛选维度: district_id、总价/单价区间、面积区间、户型、装修、
     朝向、楼层、状态、关键词搜索。
     """
     filters = ListingFilter(
         district_id=district_id,
         min_price=min_price,
         max_price=max_price,
+        min_unit_price=min_unit_price,
+        max_unit_price=max_unit_price,
         min_area=min_area,
         max_area=max_area,
         room_count=room_count,

@@ -1,4 +1,4 @@
-"""数据分析 API 端点：总览、区县对比、价格分布、趋势、聚类、特征重要性"""
+"""数据分析 API 端点：总览、区县对比、价格分布、趋势、聚类、特征重要性、价格预测"""
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,7 +7,9 @@ from app.api.deps import get_db
 from analytics.stats import get_overview_stats, get_district_compare
 from analytics.regression import analyze_feature_importance
 from analytics.clustering import get_clusters
-from analytics.trends import get_price_trends
+from analytics.trends import get_cached_trends, get_cache_status
+from analytics.predict import predict_price
+from app.schemas.analytics import PredictRequest, PredictResponse
 from app.utils.response import ok, error
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -81,14 +83,43 @@ async def clusters(
 
 
 @router.get("/trends")
-async def trends(
-    district_id: int | None = Query(None),
-    months: int = Query(12, ge=1, le=36),
+async def trends():
+    """价格趋势 — 日级均价 + SMA-7 均线 + 次日价格预测。
+
+    数据由后台定时任务维护（每日 6:00 + 启动补算），
+    此接口直接返回内存缓存，零数据库查询。
+    """
+    try:
+        data = get_cached_trends()
+        return ok(data=data)
+    except Exception as e:
+        return error(code=500, message=str(e))
+
+
+@router.get("/trends/status")
+async def trends_status():
+    """趋势缓存状态（调试用）。"""
+    return ok(data=get_cache_status())
+
+
+@router.post("/predict")
+async def predict(
+    req: PredictRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """价格趋势 — 月度均价 + 环比/同比 + SMA 平滑。"""
+    """价格预测 + 相似房源推荐。"""
     try:
-        data = await get_price_trends(db, district_id=district_id, months=months)
+        data = await predict_price(
+            db,
+            district_id=req.district_id,
+            area=req.area,
+            room_count=req.room_count,
+            hall_count=req.hall_count,
+            floor_level=req.floor_level,
+            orientation=req.orientation,
+            decoration=req.decoration,
+            building_type=req.building_type,
+        )
         return ok(data=data)
     except Exception as e:
         return error(code=500, message=str(e))

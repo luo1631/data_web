@@ -77,6 +77,8 @@ export interface ListingFilter {
   district_id?: number;
   min_price?: number;
   max_price?: number;
+  min_unit_price?: number;
+  max_unit_price?: number;
   min_area?: number;
   max_area?: number;
   room_count?: number;
@@ -137,7 +139,7 @@ export interface CommunityDetail extends Community {
   updated_at: string | null;
 }
 
-// ── 爬取 ──
+// ── 获取 ──
 export interface CrawlTask {
   id: number;
   district_id: number | null;
@@ -174,12 +176,11 @@ export interface CrawlProgress {
   completed_tasks: number;
   new_listings: number;
   updated_listings: number;
+  current_district: string | null;
   tasks: CrawlTask[];
 }
 
 export interface CrawlStartRequest {
-  type: string;
-  districts: number[];
   max_pages_per_district: number;
 }
 

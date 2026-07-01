@@ -1,14 +1,13 @@
-"""数据污染测试: 异常值检测、font 解密失败、空 HTML 处理、价格校验"""
+"""数据污染测试: 异常值检测、空 HTML 处理、价格校验"""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from crawler.cleaner import (
     parse_price, parse_unit_price, parse_area,
     normalize_decoration, normalize_orientation,
     is_price_outlier, clean_listing,
 )
-from crawler.parsers import ListParser, DetailParser, FontDecryptor, FontNotCachedError
+from crawler.parsers import DetailParser
 from crawler.dedup import compute_md5
 
 
@@ -57,62 +56,23 @@ class TestEdgeCases:
         assert parse_price("1,320.5万") == 1320.5
 
 
-class TestFontDecryptorEdgeCases:
-    def test_empty_font_url(self):
-        """空字体 URL 不会抛异常"""
-        fd = FontDecryptor()
-        # load_font with None returns False
-        import asyncio
-        async def _test():
-            result = await fd.load_font(None, None)
-            assert not result
-        asyncio.run(_test())
-
-    def test_decrypt_no_mapping(self):
-        """无映射表时原样返回"""
-        fd = FontDecryptor()
-        assert fd.decrypt("132.5万") == "132.5万"
-
-    def test_decrypt_with_mapping(self):
-        """正确解密"""
-        from crawler.constants import FONT_MAPPING_CACHE
-        test_md5 = "test_md5_123"
-        FONT_MAPPING_CACHE[test_md5] = {"驋": "1", "閏": "3", "龒": "2"}
-        fd = FontDecryptor()
-        fd._char_map = FONT_MAPPING_CACHE[test_md5]
-        assert fd.decrypt("驋閏龒") == "132"
-        # 清理
-        FONT_MAPPING_CACHE.pop(test_md5, None)
-
-    def test_parse_font_glyphs_empty(self):
-        """解析空字节"""
-        from crawler.constants import FONT_MAPPING_CACHE
-        # 无效字体 bytes 返回空 dict
-        glyphs = FontDecryptor.parse_font_glyphs(b"not a font file")
-        assert glyphs == {} or isinstance(glyphs, dict)
-
-
 class TestHTMLParsingEdgeCases:
-    @pytest.fixture
-    def list_parser(self):
-        return ListParser()
+    def test_empty_html(self):
+        """空 HTML 返回空列表"""
+        from crawler.parsers import ListParser
+        listings = ListParser.parse_listing_data("")
+        assert listings == []
 
-    def test_empty_html(self, list_parser):
-        ids = list_parser.parse_listing_ids("")
-        assert ids == []
-
-    def test_none_has_listings(self, list_parser):
-        assert not list_parser.has_listings("<html><body>暂无房源</body></html>")
-
-    def test_empty_count(self, list_parser):
-        assert list_parser.parse_total_count("<html></html>") == 0
+    def test_empty_count(self):
+        """空 HTML 返回 0"""
+        from crawler.parsers import ListParser
+        assert ListParser.parse_total_count("<html></html>") == 0
 
     def test_detail_parser_no_crash(self):
         """详情页解析器不应因畸形 HTML 崩溃"""
         parser = DetailParser("test_id", "http://example.com")
         result = parser.parse("<html><body>Not a listing page</body></html>")
         assert result.external_id == "test_id"
-        # 至少不应该崩溃
 
 
 class TestMD5Stability:

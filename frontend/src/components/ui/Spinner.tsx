@@ -11,7 +11,7 @@ export default function Spinner({ size = "md", className }: Props) {
   return (
     <div className={clsx("flex items-center justify-center", className)}>
       <svg
-        className={clsx("animate-spin text-[var(--color-primary)]", sizes[size])}
+        className={clsx("animate-spin text-[var(--color-brand)]", sizes[size])}
         viewBox="0 0 24 24"
         fill="none"
       >

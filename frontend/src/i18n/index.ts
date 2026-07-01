@@ -1,7 +1,7 @@
 import zh from "./zh.json";
 import en from "./en.json";
 
-const messages: Record<string, Record<string, string>> = { zh, en };
+const messages: Record<string, any> = { zh, en };
 
 export function t(key: string, lang: string = "zh", vars?: Record<string, string | number>): string {
   const keys = key.split(".");

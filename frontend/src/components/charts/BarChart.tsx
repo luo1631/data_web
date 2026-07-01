@@ -13,8 +13,8 @@ interface Props {
 }
 
 export default function BarChart({ title, xData, series, height = 300, horizontal = false, stacked = false }: Props) {
-  const { theme } = useThemeStore();
-  const isDark = theme === "dark";
+  const resolved = useThemeStore((s) => s.resolved);
+  const isDark = resolved === "dark";
 
   const option = {
     title: title ? { text: title, left: "center", textStyle: { fontSize: 13, color: isDark ? "#e0e0e0" : "#333" } } : undefined,

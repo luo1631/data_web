@@ -20,12 +20,21 @@ export default function Select({
   ...rest
 }: Props) {
   return (
-    <div className="flex flex-col gap-1">
-      {label && <label className="text-xs font-medium opacity-60">{label}</label>}
+    <div className="flex items-center gap-1.5">
+      {label && (
+        <label className="text-xs font-medium text-[var(--color-text-secondary)] whitespace-nowrap">
+          {label}
+        </label>
+      )}
       <select
         className={clsx(
-          "rounded border border-[var(--color-accent)] bg-[var(--color-bg)] px-3 py-1.5 text-sm",
-          "focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30",
+          "w-full rounded-[var(--radius-xs)] border border-[var(--color-border)]",
+          "bg-[var(--color-surface)] text-[var(--color-text-primary)]",
+          "px-2.5 py-1.5 text-sm",
+          "hover:border-[var(--color-brand)]/50",
+          "focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]/30 focus:border-[var(--color-brand)]",
+          "disabled:opacity-40 disabled:bg-[var(--color-accent-bg)]",
+          "transition-all duration-[var(--duration-fast)]",
           className,
         )}
         {...rest}

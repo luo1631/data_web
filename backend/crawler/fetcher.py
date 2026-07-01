@@ -1,17 +1,20 @@
 """
-HTTP 客户端封装 — m.fang.com 移动站专用。
+HTTP 客户端 — cq.esf.fang.com 全局列表页。
+
+注：httpx 仅用于首页；翻页需 Playwright 绕过滑块验证。
+    此模块保留给不需要翻页的快速首页抓取场景。
 """
 
 import asyncio
 import random
+import re
 import logging
 import httpx
 from tenacity import (
     retry, stop_after_attempt, wait_exponential, retry_if_exception_type,
 )
 from crawler.constants import (
-    BASE_URL, SEED_URL, LIST_URL_TEMPLATE, DETAIL_URL_TEMPLATE,
-    LIST_PAGE_DELAY, DETAIL_PAGE_DELAY, JITTER_RANGE, USER_AGENTS,
+    SEED_URL, LIST_PAGE_TEMPLATE, DETAIL_URL_TEMPLATE, USER_AGENTS,
 )
 
 RETRYABLE_EXCEPTIONS = (
@@ -23,11 +26,10 @@ logger = logging.getLogger(__name__)
 
 
 class Fetcher:
-    """移动端异步 HTTP 客户端"""
+    """httpx 客户端 — 仅首页抓取"""
 
     def __init__(self):
         self._client: httpx.AsyncClient | None = None
-        self._last_request: dict[str, float] = {}
 
     async def __aenter__(self) -> "Fetcher":
         self._client = httpx.AsyncClient(
@@ -39,7 +41,21 @@ class Fetcher:
                 "Accept-Encoding": "gzip, deflate, br",
             },
         )
-        # 播种 Cookie（访问首页）
+        await self._seed()
+        return self
+
+    async def __aexit__(self, *args) -> None:
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+
+    async def fetch_page(self, page: int) -> tuple[str, str]:
+        """抓取全局列表页。page=1 → 首页，page>=2 → /house/i3{N}/"""
+        url = SEED_URL if page <= 1 else LIST_PAGE_TEMPLATE.format(page=str(page))
+        html = await self._fetch(url)
+        return html, url
+
+    async def _seed(self) -> None:
         try:
             resp = await self._client.get(SEED_URL, headers={
                 "User-Agent": random.choice(USER_AGENTS),
@@ -48,47 +64,25 @@ class Fetcher:
                 logger.debug(f"Seeded {len(dict(self._client.cookies))} cookies")
         except Exception:
             pass
-        return self
-
-    async def __aexit__(self, *args) -> None:
-        if self._client:
-            await self._client.aclose()
-            self._client = None
-
-    async def fetch_list_page(self, slug: str, page: int) -> str:
-        url = LIST_URL_TEMPLATE.format(slug=slug, page=page)
-        await self._rate_limit("list")
-        return await self._fetch(url)
-
-    async def fetch_detail_page(self, house_id: str) -> str:
-        url = DETAIL_URL_TEMPLATE.format(house_id=house_id)
-        await self._rate_limit("detail")
-        return await self._fetch(url)
-
-    async def _rate_limit(self, group: str) -> None:
-        now = asyncio.get_running_loop().time()
-        last = self._last_request.get(group, 0)
-        elapsed = now - last
-        base = random.uniform(*LIST_PAGE_DELAY) if group == "list" else random.uniform(*DETAIL_PAGE_DELAY)
-        target = base * random.uniform(*JITTER_RANGE)
-        if elapsed < target:
-            await asyncio.sleep(target - elapsed)
-        self._last_request[group] = asyncio.get_running_loop().time()
 
     async def _fetch(self, url: str) -> str:
-        headers = {"User-Agent": random.choice(USER_AGENTS)}
+        headers = {
+            "User-Agent": random.choice(USER_AGENTS),
+            "Referer": SEED_URL,
+        }
         return await self._retry_request(self._client, url, headers)
 
     @staticmethod
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=5, min=5, max=60),
-        retry=retry_if_exception_type(RETRYABLE_EXCEPTIONS),
-        reraise=True,
-    )
+    @retry(stop=stop_after_attempt(3),
+           wait=wait_exponential(multiplier=5, min=5, max=60),
+           retry=retry_if_exception_type(RETRYABLE_EXCEPTIONS),
+           reraise=True)
     async def _retry_request(client: httpx.AsyncClient, url: str, headers: dict) -> str:
         resp = await client.get(url, headers=headers)
         if resp.status_code in (429, 403):
             resp.raise_for_status()
         resp.raise_for_status()
+        content = resp.content
+        if re.search(rb'charset\s*=\s*[\"\']?(?:gbk|gb2312)', content[:2000], re.I):
+            return content.decode('gb18030', errors='replace')
         return resp.text

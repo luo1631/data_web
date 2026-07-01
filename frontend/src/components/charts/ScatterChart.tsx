@@ -10,11 +10,12 @@ interface Props {
   height?: number;
 }
 
-const CLUSTER_COLORS = ["#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de"];
+// Shopify 衍生色系
+const CLUSTER_COLORS = ["#1e2c31", "#3d5a62", "#6b838a", "#9dabad", "#bdbdca"];
 
 export default function ScatterChart({ title, data, clusters = [], height = 350 }: Props) {
-  const { theme } = useThemeStore();
-  const isDark = theme === "dark";
+  const resolved = useThemeStore((s) => s.resolved);
+  const isDark = resolved === "dark";
 
   const clusterMap = new Map(clusters.map((c) => [c.id, { name: c.label, data: [] as number[][] }]));
 
@@ -32,7 +33,7 @@ export default function ScatterChart({ title, data, clusters = [], height = 350 
     grid: { left: 10, right: 20, top: title ? 35 : 10, bottom: 35, containLabel: true },
     xAxis: { type: "value" as const, axisLabel: { fontSize: 10, color: isDark ? "#999" : "#666" } },
     yAxis: { type: "value" as const, axisLabel: { fontSize: 10, color: isDark ? "#999" : "#666" } },
-    series: Array.from(clusterMap.entries()).map(([id, s], i) => ({
+    series: Array.from(clusterMap.entries()).map(([_id, s], i) => ({
       name: s.name,
       type: "scatter" as const,
       data: s.data,
