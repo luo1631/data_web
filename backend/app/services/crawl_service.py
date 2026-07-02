@@ -186,7 +186,8 @@ async def get_batches(db: AsyncSession) -> list[CrawlBatchRead]:
         for row_bid, row_status, row_start, row_end, row_dname in tr.all():
             if row_dname:
                 districts_by_batch.setdefault(row_bid, []).append(row_dname)
-            if row_status == "completed":
+            # 所有非 pending 的 task 都计入页数（completed/stopped/failed 都有实际抓取过页面）
+            if row_status != "pending" and row_end is not None:
                 pages_by_batch[row_bid] += (row_end or 1) - (row_start or 1) + 1
 
     return [

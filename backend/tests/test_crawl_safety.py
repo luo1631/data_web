@@ -92,9 +92,20 @@ class TestFetcherLifecycle:
         """PlaywrightFetcher 初始化参数正确"""
         pf = PlaywrightFetcher(headless=True)
         assert pf._headless is True
-        assert pf._viewport == {"width": 1920, "height": 1080}
         assert pf._browser is None
         assert pf._page is None
+        assert pf._context is None
+        assert pf._context_rotation_count == 0
+
+    def test_playwright_fetcher_viewport_pool(self):
+        """视角池包含多种分辨率"""
+        from crawler.playwright_fetcher import _VIEWPORT_POOL, _UA_POOL
+        assert len(_VIEWPORT_POOL) >= 3
+        assert len(_UA_POOL) >= 3
+        # 所有视角都有合理的宽高
+        for vp in _VIEWPORT_POOL:
+            assert vp["width"] >= 1024
+            assert vp["height"] >= 600
 
 
 class TestRetryLogic:

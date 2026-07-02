@@ -92,8 +92,15 @@ JITTER_RANGE = (0.7, 1.3)
 MAX_PAGES = 100
 MAX_PAGES_PER_DISTRICT = 100     # 每个区县最多翻页数
 LISTINGS_PER_PAGE = 60
-DRY_PAGE_THRESHOLD = 3            # 连续 N 页无变化即停止该区县
+DRY_PAGE_THRESHOLD = 3            # 连续 N 页无原始数据（HTML 无房源）即停止该区县
+ZERO_YIELD_THRESHOLD = 5          # 连续 N 页有数据但无新增/更新即停止该区县（全已入库）
+LOW_YIELD_JUMP_THRESHOLD = 2      # 连续 N 页零产出触发跳页（可能踩到历史已爬页面）
+JUMP_PAGES = 2                    # 每次跳过几页
+MAX_JUMPS_PER_DISTRICT = 3        # 每个区县最多跳页次数（防止无限跳过末尾）
 FETCH_FAILURE_THRESHOLD = 3       # 连续 N 页网络错误即停止该区县
+CONTEXT_ROTATE_PAGES = 50         # 每 N 页轮换一次浏览器上下文（防指纹追踪）
+PAGE_1_EMPTY_SKIP = True          # 第 1 页就无数据 → 直接跳过该区县（花 1 页而非 DRY_THRESHOLD 页诊断）
+MAX_DISTRICT_BACKOFF = 600        # 低产区县最大冷却时间（秒）
 
 # 历史兼容
 
