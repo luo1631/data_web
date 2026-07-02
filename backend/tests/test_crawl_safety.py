@@ -4,45 +4,39 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from crawler.fetcher import Fetcher
+from crawler.playwright_fetcher import PlaywrightFetcher
 from crawler.engine import CrawlEngine
-from crawler.constants import LIST_CONCURRENCY
 
 
 class TestRateLimiting:
     @pytest.mark.asyncio
     async def test_rate_limit_enforces_delay(self):
-        """_rate_limit 应产生至少最小延迟"""
-        async with Fetcher() as fetcher:
-            t0 = asyncio.get_running_loop().time()
-            # 首次请求无延迟
-            await fetcher._rate_limit("list")
-            t1 = asyncio.get_running_loop().time()
-            # 第二次应有延迟
-            await fetcher._rate_limit("list")
-            t2 = asyncio.get_running_loop().time()
-            # 至少产生了延迟（基础延迟 3-5s × 最小 jitter 0.7 ≈ 2.1s）
-            delay = t2 - t1
-            assert delay > 0.5  # 至少有 0.5s 延迟（放宽阈值避免偶发失败）
+        """_rate_limit 应在连续请求间产生延迟（MIN_PAGE_DELAY=1.5s）"""
+        pf = PlaywrightFetcher(headless=True)
+        # 不启动浏览器，仅测试限速逻辑（_rate_limit 不依赖 browser/page）
+        t0 = asyncio.get_running_loop().time()
+        await pf._rate_limit()  # 首次：_last_request_time=0，无延迟
+        t1 = asyncio.get_running_loop().time()
+        await pf._rate_limit()  # 第二次：应有 >=1.5s 延迟
+        t2 = asyncio.get_running_loop().time()
+        # 首次几乎无延迟
+        assert (t1 - t0) < 0.5
+        # 第二次有至少 1.0s 延迟（MIN_PAGE_DELAY=1.5，留余量避免偶发失败）
+        assert (t2 - t1) >= 1.0
 
     @pytest.mark.asyncio
-    async def test_list_vs_detail_separate_groups(self):
-        """列表页和详情页使用独立的限速组"""
-        async with Fetcher() as fetcher:
-            t0 = asyncio.get_running_loop().time()
-            await fetcher._rate_limit("list")
-            await fetcher._rate_limit("detail")
-            t1 = asyncio.get_running_loop().time()
-            # 不同 group 之间不应该互相等待
-            assert (t1 - t0) < 1.0  # 第一个 list 请求无延迟 + detail 首次也无延迟
+    async def test_rate_limit_respects_min_delay(self):
+        """连续快速请求应有足够间隔"""
+        pf = PlaywrightFetcher(headless=True)
+        await pf._rate_limit()  # 初始化计时器
+        t0 = asyncio.get_running_loop().time()
+        await pf._rate_limit()
+        t1 = asyncio.get_running_loop().time()
+        # MIN_PAGE_DELAY=1.5s，应有至少 1s 间隔
+        assert (t1 - t0) >= 1.0
 
 
 class TestConcurrencyControl:
-    def test_semaphore_limits(self):
-        """信号量初始值正确"""
-        engine = CrawlEngine(None)
-        assert engine._list_sem._value == LIST_CONCURRENCY
-
     @pytest.mark.asyncio
     async def test_concurrent_acquire(self):
         """信号量正确限制并发"""
@@ -58,41 +52,49 @@ class TestConcurrencyControl:
         tasks = [worker(i) for i in range(5)]
         await asyncio.gather(*tasks)
 
-        # 最多 2 个同时持有
-        # （验证的是没有死锁，信号量正常工作）
+        # 最多 2 个同时持有（验证无死锁，信号量正常工作）
         assert sem._value == 2  # 全部释放
 
 
 class TestStopControl:
     def test_stop_sets_running_false(self):
+        """stop() 应设置状态为 stopped，_running 返回 False"""
         engine = CrawlEngine(None)
-        engine._running = True
+        # 初始 status="starting" → _running property 返回 True
+        assert engine._running
         engine.stop()
         assert not engine._running
+        assert engine._status == "stopped"
 
     def test_progress_reflects_state(self):
+        """get_progress 应正确反映引擎状态"""
         engine = CrawlEngine(None)
+        # 初始状态: status="starting", running=True
+        p = engine.get_progress()
+        assert p["status"] == "starting"
+        assert p["running"]  # "starting" 视为运行中
+        assert p["errors"] == 0
+        # 停止后 running 为 False
+        engine.stop()
         p = engine.get_progress()
         assert not p["running"]
-        assert p["new"] == 0
-        assert p["errors"] == 0
 
 
 class TestFetcherLifecycle:
-    @pytest.mark.asyncio
-    async def test_context_manager_cleanup(self):
-        """Fetcher 作为 context manager 正确清理"""
-        async with Fetcher() as f:
-            assert f._client is not None
-        # __aexit__ 后 client 应为 None
-        assert f._client is None
-
     @pytest.mark.asyncio
     async def test_user_agent_pool_diverse(self):
         """UA 池应有足够多样性"""
         from crawler.constants import USER_AGENTS
         assert len(USER_AGENTS) >= 5
         assert len(set(USER_AGENTS)) == len(USER_AGENTS)  # 无重复
+
+    def test_playwright_fetcher_init_defaults(self):
+        """PlaywrightFetcher 初始化参数正确"""
+        pf = PlaywrightFetcher(headless=True)
+        assert pf._headless is True
+        assert pf._viewport == {"width": 1920, "height": 1080}
+        assert pf._browser is None
+        assert pf._page is None
 
 
 class TestRetryLogic:

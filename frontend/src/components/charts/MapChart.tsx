@@ -130,5 +130,5 @@ export default function MapChart({ title, data, height = 500, lang = "zh" }: Pro
     backgroundColor: "transparent",
   };
 
-  return <ReactECharts option={option} style={{ height }} />;
+  return <ReactECharts option={option} style={{ height: height > 0 ? height : "100%" }} />;
 }

@@ -27,6 +27,7 @@ class Listing(Base):
     total_floors: Mapped[int | None] = mapped_column(SmallInteger)
     orientation: Mapped[str | None] = mapped_column(String(50))
     decoration: Mapped[str | None] = mapped_column(String(50))
+    listing_type: Mapped[str] = mapped_column(String(20), default="regular", nullable=False)
     building_type: Mapped[str | None] = mapped_column(String(50))
     building_structure: Mapped[str | None] = mapped_column(String(50))
     has_elevator: Mapped[bool | None] = mapped_column(Boolean)

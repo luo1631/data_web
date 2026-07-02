@@ -61,7 +61,7 @@ async def compute_and_cache() -> None:
             source = "price_history"
 
             if not rows:
-                # 回退: listing_date
+                # 回退 1: listing_date（详情页解析填充，当前批量爬虫仅采集列表页故多为空）
                 l_result = await db.execute(
                     select(
                         func.strftime("%Y-%m-%d", Listing.listing_date).label("date"),
@@ -71,13 +71,13 @@ async def compute_and_cache() -> None:
                         Listing.status == "active",
                         Listing.listing_date.isnot(None),
                         Listing.unit_price > 0,
-                    ).group_by("date").order_by("date").limit(DEFAULT_DAYS + 10)
+                    ).group_by("date").order_by("date")
                 )
                 rows = l_result.all()
-                source = "listings"
+                source = "listing_date"
 
             if not rows:
-                # 回退: first_seen_at
+                # 回退 2: first_seen_at（爬虫首次入库时自动填充，保证有数据）
                 fs_result = await db.execute(
                     select(
                         func.strftime("%Y-%m-%d", Listing.first_seen_at).label("date"),
@@ -85,9 +85,8 @@ async def compute_and_cache() -> None:
                         func.count().label("cnt"),
                     ).where(
                         Listing.status == "active",
-                        Listing.first_seen_at.isnot(None),
                         Listing.unit_price > 0,
-                    ).group_by("date").order_by("date").limit(DEFAULT_DAYS + 10)
+                    ).group_by("date").order_by("date")
                 )
                 rows = fs_result.all()
                 source = "first_seen_at"
@@ -155,7 +154,7 @@ def setup_trends_scheduler(scheduler, startup_time: datetime | None = None) -> N
 
     规则:
       1. 每日 6:00 自动计算
-      2. 启动时 > 6:00 → 启动 5 分钟后补算一次
+      2. 服务启动时立即计算一次（避免前端空数据等待）
 
     Args:
         scheduler: APScheduler AsyncIOScheduler 实例
@@ -176,19 +175,14 @@ def setup_trends_scheduler(scheduler, startup_time: datetime | None = None) -> N
     )
     logger.info("[Trends] 已注册每日 6:00 趋势计算任务")
 
-    # 启动补算：当前时间超过今日 6:00 时，5 分钟后计算
-    today_6am = now.replace(hour=6, minute=0, second=0, microsecond=0)
-    if now >= today_6am:
-        run_at = now + timedelta(minutes=5)
-        scheduler.add_job(
-            func=compute_and_cache,
-            trigger=DateTrigger(run_date=run_at),
-            id="trends_startup_bootstrap",
-            replace_existing=True,
-        )
-        logger.info("[Trends] 启动时间 %s > 今日 6:00，将在 %s 执行首次计算", now.strftime("%H:%M"), run_at.strftime("%H:%M:%S"))
-    else:
-        logger.info("[Trends] 启动时间 %s < 今日 6:00，等待定时触发", now.strftime("%H:%M"))
+    # 启动时立即计算一次（2 秒延迟，给其他初始化留时间）
+    scheduler.add_job(
+        func=compute_and_cache,
+        trigger=DateTrigger(run_date=now + timedelta(seconds=2)),
+        id="trends_startup_bootstrap",
+        replace_existing=True,
+    )
+    logger.info("[Trends] 启动补算已调度，将在 %s 执行首次计算", (now + timedelta(seconds=2)).strftime("%H:%M:%S"))
 
 
 # ── 内部计算函数 ──

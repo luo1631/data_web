@@ -81,6 +81,9 @@ def build_listing_query(filters: ListingFilter) -> Select:
     if filters.floor_level:
         conditions.append(Listing.floor_level == filters.floor_level)
 
+    if filters.listing_type is not None:
+        conditions.append(Listing.listing_type == filters.listing_type)
+
     if filters.status is not None:
         conditions.append(Listing.status == filters.status)
 
@@ -144,6 +147,7 @@ async def get_listing_detail(
         title=listing.title,
         district_id=listing.district_id,
         community_name=community_name,
+        listing_type=listing.listing_type or "regular",
         total_price=listing.total_price,
         unit_price=listing.unit_price,
         area=listing.area,
@@ -285,6 +289,7 @@ def listing_to_read(listing: Listing, community_name: str | None = None) -> List
         title=listing.title,
         district_id=listing.district_id,
         community_name=community_name,
+        listing_type=listing.listing_type or "regular",
         total_price=listing.total_price,
         unit_price=listing.unit_price,
         area=listing.area,

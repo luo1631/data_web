@@ -31,3 +31,22 @@ backend/alembic/versions/*.pyc
 
 # Logs
 *.log
+
+# Debug / temp files
+backend/tmp/
+backend/*.html
+
+# Data exports (generated, not source)
+data.json
+map.json
+
+# Test cache
+.pytest_cache/
+
+# Playwright
+backend/.playwright/
+
+# Coverage
+htmlcov/
+.coverage
+coverage.xml

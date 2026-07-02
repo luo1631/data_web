@@ -59,28 +59,42 @@ export interface PriceTrends {
   status_note: string | null;
 }
 
-export async function fetchOverview(districtId?: number): Promise<OverviewStats> {
-  const resp = await apiClient.get<APIResponse<OverviewStats>>("/analytics/overview", { params: districtId ? { district_id: districtId } : {} });
+export async function fetchOverview(districtId?: number, includeCourtAuction?: boolean): Promise<OverviewStats> {
+  const params: Record<string, any> = {};
+  if (districtId) params.district_id = districtId;
+  if (includeCourtAuction !== undefined) params.include_court_auction = includeCourtAuction;
+  const resp = await apiClient.get<APIResponse<OverviewStats>>("/analytics/overview", { params });
   return resp.data.data!;
 }
 
-export async function fetchDistrictCompare(): Promise<DistrictCompareItem[]> {
-  const resp = await apiClient.get<APIResponse<DistrictCompareItem[]>>("/analytics/district-compare");
+export async function fetchDistrictCompare(includeCourtAuction?: boolean): Promise<DistrictCompareItem[]> {
+  const params: Record<string, any> = {};
+  if (includeCourtAuction !== undefined) params.include_court_auction = includeCourtAuction;
+  const resp = await apiClient.get<APIResponse<DistrictCompareItem[]>>("/analytics/district-compare", { params });
   return resp.data.data ?? [];
 }
 
-export async function fetchPriceDistribution(districtId?: number) {
-  const resp = await apiClient.get<APIResponse<any>>("/analytics/price-distribution", { params: districtId ? { district_id: districtId } : {} });
+export async function fetchPriceDistribution(districtId?: number, includeCourtAuction?: boolean) {
+  const params: Record<string, any> = {};
+  if (districtId) params.district_id = districtId;
+  if (includeCourtAuction !== undefined) params.include_court_auction = includeCourtAuction;
+  const resp = await apiClient.get<APIResponse<any>>("/analytics/price-distribution", { params });
   return resp.data.data!;
 }
 
-export async function fetchFeatureImportance(districtId?: number): Promise<FeatureImportance> {
-  const resp = await apiClient.get<APIResponse<FeatureImportance>>("/analytics/feature-importance", { params: districtId ? { district_id: districtId } : {} });
+export async function fetchFeatureImportance(districtId?: number, includeCourtAuction?: boolean): Promise<FeatureImportance> {
+  const params: Record<string, any> = {};
+  if (districtId) params.district_id = districtId;
+  if (includeCourtAuction !== undefined) params.include_court_auction = includeCourtAuction;
+  const resp = await apiClient.get<APIResponse<FeatureImportance>>("/analytics/feature-importance", { params });
   return resp.data.data!;
 }
 
-export async function fetchClusters(districtId?: number): Promise<ClusterResult> {
-  const resp = await apiClient.get<APIResponse<ClusterResult>>("/analytics/clusters", { params: districtId ? { district_id: districtId } : {} });
+export async function fetchClusters(districtId?: number, includeCourtAuction?: boolean): Promise<ClusterResult> {
+  const params: Record<string, any> = {};
+  if (districtId) params.district_id = districtId;
+  if (includeCourtAuction !== undefined) params.include_court_auction = includeCourtAuction;
+  const resp = await apiClient.get<APIResponse<ClusterResult>>("/analytics/clusters", { params });
   return resp.data.data!;
 }
 

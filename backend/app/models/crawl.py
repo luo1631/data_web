@@ -10,7 +10,7 @@ class CrawlBatch(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     type: Mapped[str] = mapped_column(String(20), nullable=False)
-    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False, index=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime)
     total_tasks: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

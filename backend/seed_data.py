@@ -8,8 +8,7 @@ from app.database import engine, Base, async_session
 from app.models import District, Community, Listing, PriceHistory, CrawlBatch, CrawlTask
 
 DISTRICTS = [
-    ("渝北区", "yubei", True),
-    ("江北区", "jiangbei", True),
+    ("两江新区", "liangjiang", True),
     ("渝中区", "yuzhong", True),
     ("南岸区", "nanan", True),
     ("九龙坡区", "jiulongpo", True),

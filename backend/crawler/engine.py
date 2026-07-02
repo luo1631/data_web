@@ -89,76 +89,160 @@ class CrawlEngine:
 
             global_seen: set[str] = set()
 
+            # 区县任务队列（支持轮转）：遇反爬暂停→跳到下一个→回头补
+            # 每个区县: {district_info, task_id, page, dry, captcha_strikes,
+            #             connection_strikes, district_max, paused_until}
+            district_queue: list[dict] = []
+            for d in districts:
+                district_queue.append({
+                    "district": d,
+                    "task_id": None,
+                    "page": 1,
+                    "dry": 0,
+                    "captcha_strikes": 0,
+                    "connection_strikes": 0,
+                    "district_max": max_pages,
+                    "paused_until": 0.0,
+                    "completed": False,
+                })
+
             try:
                 async with PlaywrightFetcher(headless=True) as pf:
-                    for d_idx, district in enumerate(districts):
-                        if not self._running:
-                            break
-                        d_name = district["name"]
-                        d_code = district["fang_code"]
-                        d_db_id = self._district_id_map.get(d_name, 1)
+                    active_count = len(district_queue)
 
-                        self._current_district = d_name
-                        self._current_page = 0
+                    while active_count > 0 and self._running:
+                        made_progress = False
 
-                        # 为每个区县创建独立 task
-                        task_id = await pipeline.create_crawl_task(batch_id, d_db_id)
+                        for idx, ctx in enumerate(district_queue):
+                            if ctx["completed"]:
+                                continue
+                            if not self._running:
+                                break
 
-                        page = 1
-                        dry = 0
-                        district_max = max_pages  # 将被第一页实际总页数缩小
-
-                        logger.info(f"[{d_idx+1}/{total_districts}] {d_name} ({d_code})")
-
-                        while page <= district_max and self._running:
-                            try:
-                                html, url = await pf.fetch_page(page=page, fang_code=d_code)
-                            except Exception as e:
-                                logger.error(f"{d_name} page {page}: fetch failed — {e}")
-                                self._current_page = page
-                                dry += 1
-                                if dry >= FETCH_FAILURE_THRESHOLD:
-                                    break
-                                page += 1
+                            # 反爬冷却中 → 跳过，等时间到了再试
+                            now_t = asyncio.get_running_loop().time()
+                            if now_t < ctx["paused_until"]:
                                 continue
 
-                            new_n, updated_n = await self._process_page(
+                            d = ctx["district"]
+                            d_name = d["name"]
+                            d_code = d["fang_code"]
+                            d_db_name = d.get("db_name", d_name)
+                            d_db_id = self._district_id_map.get(d_db_name, 1)
+
+                            # 首次：创建 task
+                            if ctx["task_id"] is None:
+                                ctx["task_id"] = await pipeline.create_crawl_task(batch_id, d_db_id)
+                                logger.info(f"[{idx+1}/{total_districts}] {d_name} ({d_code})")
+
+                            self._current_district = d_name
+                            task_id = ctx["task_id"]
+                            p = ctx["page"]
+
+                            # ── fetch ──
+                            try:
+                                html, url = await pf.fetch_page(page=p, fang_code=d_code)
+                            except Exception as e:
+                                logger.error(f"{d_name} page {p}: {e}")
+                                self._current_page = p
+                                ctx["connection_strikes"] += 1
+                                if ctx["connection_strikes"] <= 3:
+                                    # 指数退避: 30s → 60s → 120s，每轮轮流爬其他区县
+                                    pause_sec = 30 * (2 ** (ctx["connection_strikes"] - 1))
+                                    logger.warning(
+                                        f"{d_name}: paused at page {p}, "
+                                        f"retry in {pause_sec}s (strike {ctx['connection_strikes']}/3)"
+                                    )
+                                    ctx["paused_until"] = now_t + pause_sec
+                                    await self._sync_db(pipeline, task_id, batch_id)
+                                    continue  # 跳到下一个区县
+                                logger.error(f"{d_name}: too many resets, skipping")
+                                ctx["completed"] = True
+                                active_count -= 1
+                                await pipeline.finish_crawl_task(task_id, "failed")
+                                continue
+
+                            ctx["connection_strikes"] = 0
+                            ctx["paused_until"] = 0.0
+
+                            # ── captcha ──
+                            if PlaywrightFetcher.is_captcha_page(html):
+                                ctx["captcha_strikes"] += 1
+                                if ctx["captcha_strikes"] >= 5:
+                                    logger.error(f"{d_name}: too many captchas, skipping")
+                                    ctx["completed"] = True
+                                    active_count -= 1
+                                    await pipeline.finish_crawl_task(task_id, "failed")
+                                    continue
+                                pause = 30 * ctx["captcha_strikes"]
+                                logger.warning(f"{d_name} page {p}: captcha, skip {pause}s")
+                                ctx["paused_until"] = now_t + pause
+                                continue  # 跳下一个区县
+
+                            # ── empty ──
+                            if not html or len(html) < 500:
+                                ctx["connection_strikes"] += 1
+                                if ctx["connection_strikes"] <= 3:
+                                    ctx["paused_until"] = now_t + 60 * ctx["connection_strikes"]
+                                    continue
+                                ctx["completed"] = True
+                                active_count -= 1
+                                continue
+
+                            # ── process ──
+                            new_n, updated_n, raw_count = await self._process_page(
                                 html, global_seen, pipeline, batch_id, url, default_district_id=d_db_id,
                             )
-                            self._current_page = page
+                            self._current_page = p
+                            made_progress = True
+                            ctx["captcha_strikes"] = 0
 
-                            # 第一页：从翻页栏读取实际总页数，缩小上限
-                            if page == 1 and district_max == max_pages:
+                            # 第一页：cap district_max
+                            if p == 1 and ctx["district_max"] == max_pages:
                                 real_max = ListParser.parse_max_page(html)
                                 if real_max > 0:
-                                    district_max = min(district_max, real_max)
-                                    logger.info(f"{d_name}: real max page={real_max}, cap to {district_max}")
-                                elif new_n + updated_n == 0:
-                                    # 无翻页栏 + 无数据 → 1 页空区县，直接跳过
+                                    ctx["district_max"] = min(max_pages, real_max)
+                                    logger.info(f"{d_name}: real max page={real_max}, cap to {ctx['district_max']}")
+                                elif raw_count == 0:
                                     logger.info(f"{d_name}: single empty page → done")
-                                    break
+                                    ctx["completed"] = True
+                                    active_count -= 1
+                                    await pipeline.finish_crawl_task(task_id, "completed")
+                                    continue
 
-                            if new_n + updated_n == 0:
-                                dry += 1
-                                if dry >= DRY_PAGE_THRESHOLD:
-                                    logger.info(f"{d_name} page {page}: stale → done")
-                                    break
+                            # DRY
+                            if raw_count == 0:
+                                ctx["dry"] += 1
+                                if ctx["dry"] >= DRY_PAGE_THRESHOLD:
+                                    logger.info(f"{d_name} page {p}: stale → done")
+                                    ctx["completed"] = True
+                                    active_count -= 1
+                                    await pipeline.finish_crawl_task(task_id, "completed")
+                                    continue
                             else:
-                                dry = 0
+                                ctx["dry"] = 0
 
-                            if page % DB_SYNC_INTERVAL == 0:
+                            if p % DB_SYNC_INTERVAL == 0:
                                 await self._sync_db(pipeline, task_id, batch_id)
 
-                            page += 1
+                            ctx["page"] += 1
 
-                        # 区县结束：同步并标记 task 完成
-                        await self._sync_db(pipeline, task_id, batch_id)
-                        task_status = "completed" if self._running else "stopped"
-                        await pipeline.finish_crawl_task(task_id, task_status)
-                        logger.info(
-                            f"{d_name}: done ({self._current_page} pages, "
-                            f"total {self._new_count} new / {self._updated_count} updated)"
-                        )
+                            # 该区县翻完了
+                            if ctx["page"] > ctx["district_max"]:
+                                ctx["completed"] = True
+                                active_count -= 1
+                                await self._sync_db(pipeline, task_id, batch_id)
+                                await pipeline.finish_crawl_task(task_id, "completed")
+                                logger.info(
+                                    f"{d_name}: done ({ctx['page']-1} pages, "
+                                    f"total {self._new_count} new / {self._updated_count} updated)"
+                                )
+
+                        # 一轮结束：所有区县都 pause 中或已完成
+                        if not made_progress and active_count > 0:
+                            # 所有活区县都在冷却 → 等 30s 再轮询
+                            logger.debug(f"All districts paused/cooling, waiting 30s...")
+                            await asyncio.sleep(30)
 
             except asyncio.CancelledError:
                 if self._status == "running":
@@ -191,24 +275,45 @@ class CrawlEngine:
 
     # ── page processing ─────────────────────────────
 
-    async def _process_page(self, html, global_seen, pipeline, batch_id, url, default_district_id=1) -> tuple[int, int]:
+    async def _process_page(self, html, global_seen, pipeline, batch_id, url, default_district_id=1) -> tuple[int, int, int]:
         if not html or len(html) < 500:
-            return 0, 0
+            logger.warning(f"  _process_page: HTML too short ({len(html) if html else 0} bytes), likely captcha or empty")
+            return 0, 0, 0
         listings = ListParser.parse_listing_data(html)
         if not listings:
-            return 0, 0
+            dl_count = html.count('data-bg') if html else 0
+            link_count = html.count('/chushou/') if html else 0
+            logger.warning(
+                f"  _process_page: 0 listings parsed from HTML "
+                f"(html={len(html)} bytes, data-bg={dl_count}, /chushou/={link_count})"
+            )
+            return 0, 0, 0
+
+        # raw_count: 此页 HTML 中解析出的房源条数（去重前），
+        # 用于区分「页面无数据」和「页面有数据但全部未变化」两种场景
+        raw_count = len(listings)
 
         to_insert: list[tuple[dict, int]] = []
         page_ids = set()
+        skipped_seen = 0
         for li in listings:
             hid = li.get("house_id", "")
-            if not hid or hid in page_ids or hid in global_seen:
+            if not hid:
+                continue
+            if hid in page_ids or hid in global_seen:
+                skipped_seen += 1
                 continue
             page_ids.add(hid)
             to_insert.append((li, self._resolve_district(li, default_district_id)))
 
+        if skipped_seen:
+            logger.info(
+                f"  _process_page: {raw_count} parsed, {skipped_seen} skipped (already seen), "
+                f"{len(to_insert)} to insert"
+            )
+
         if not to_insert:
-            return 0, 0
+            return 0, 0, raw_count
 
         for li, _ in to_insert:
             global_seen.add(li["house_id"])
@@ -227,7 +332,7 @@ class CrawlEngine:
                 self._unchanged_count += 1
 
         await pipeline.flush()
-        return page_new, page_updated
+        return page_new, page_updated, raw_count
 
     # ── insert ──────────────────────────────────────
 
@@ -257,14 +362,11 @@ class CrawlEngine:
     # ── district ────────────────────────────────────
 
     def _resolve_district(self, data: dict, default_id: int = 1) -> int:
-        """从房源文本推断区县归属，以当前 fang_code 筛选的区县为默认。"""
-        title = data.get("title", "") or ""
-        comm = data.get("community_name", "") or ""
-        addr = data.get("community_address", "") or ""
-        text = f"{title} {comm} {addr}"
-        name = self._resolver.resolve(text, default=None)
-        if name and name in self._district_id_map:
-            return self._district_id_map[name]
+        """返回房源所属区县 DB ID。
+
+        当前所有爬取均已按 fang_code 区县筛选，页面内房源必然属于该区县。
+        文本推断仅做辅助校验，不覆盖 default_id。
+        """
         return default_id
 
     # ── helpers ─────────────────────────────────────

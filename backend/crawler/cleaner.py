@@ -238,35 +238,40 @@ def clean_list_page_data(data: dict) -> dict:
     """将列表页解析结果直接清洗为 DB 就绪 dict（不爬详情页）。
 
     列表页已含：title, total_price, area, room/hall/bathroom,
-    orientation, decoration, floor_level, community_name。
+    orientation, decoration, floor_level, building_type, total_floors,
+    community_name, community_address。
     单价可由总价÷面积推算。
     """
     total_price = data.get("total_price")
     area = data.get("area")
 
-    # 推算单价
-    unit_price = None
-    if total_price is not None and area is not None and area > 0:
+    # 推算单价（列表页单价有时为域名加密字体，优先用解析值，否则推算）
+    unit_price = data.get("unit_price")
+    if unit_price is None and total_price is not None and area is not None and area > 0:
         unit_price = round(total_price * 10000 / area, 2)
+
+    # listing_date: 列表页不含此信息，使用 None（DB 会以 first_seen_at 兜底）
+    listing_date = data.get("listing_date")
 
     return {
         "total_price": total_price,
         "unit_price": unit_price,
         "area": area,
+        "listing_type": data.get("listing_type", "regular"),
         "room_count": data.get("room_count"),
         "hall_count": data.get("hall_count"),
         "bathroom_count": data.get("bathroom_count"),
         "floor_level": normalize_floor_level(data.get("floor_level")),
-        "total_floors": None,
+        "total_floors": data.get("total_floors"),
         "orientation": normalize_orientation(data.get("orientation")),
         "decoration": normalize_decoration(data.get("decoration")),
-        "building_type": None,
+        "building_type": data.get("building_type"),
         "building_structure": None,
         "has_elevator": None,
         "community_name": data.get("community_name"),
-        "community_address": None,
-        "listing_date": None,
-        "listing_age_days": None,
+        "community_address": data.get("community_address"),
+        "listing_date": listing_date,
+        "listing_age_days": None if not listing_date else (date.today() - listing_date).days,
         "title": data.get("title"),
     }
 

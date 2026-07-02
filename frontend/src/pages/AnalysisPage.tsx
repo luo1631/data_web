@@ -33,17 +33,22 @@ export default function AnalysisPage() {
   const [trends, setTrends] = useState<PriceTrends | null>(null);
   const [mapData, setMapData] = useState<MapPriceItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [includeAuction, setIncludeAuction] = useState(false);  // 默认不含法拍房
 
-  const load = useCallback(async (tab: Tab) => {
+  const load = useCallback(async (tab: Tab, includeAuc: boolean) => {
     setLoading(true);
+    const ac = includeAuc ? undefined : false;  // false → 仅 regular
     try {
       if (tab === "overview" || tab === "districts") {
-        const [o, c] = await Promise.all([fetchOverview(), fetchDistrictCompare()]);
+        const [o, c] = await Promise.all([
+          fetchOverview(undefined, ac),
+          fetchDistrictCompare(ac),
+        ]);
         setOverview(o);
         setCompare(c);
       }
-      if (tab === "factors") setImportance(await fetchFeatureImportance());
-      if (tab === "clusters") setCluster(await fetchClusters());
+      if (tab === "factors") setImportance(await fetchFeatureImportance(undefined, ac));
+      if (tab === "clusters") setCluster(await fetchClusters(undefined, ac));
       if (tab === "trends") setTrends(await fetchTrends());
       if (tab === "map") setMapData(await fetchMapPrices());
     } finally {
@@ -51,15 +56,15 @@ export default function AnalysisPage() {
     }
   }, []);
 
-  useEffect(() => { load(tab); }, [tab, load]);
+  useEffect(() => { load(tab, includeAuction); }, [tab, includeAuction, load]);
   useEffect(() => {
-    if (location.pathname === "/analysis") load(tab);
+    if (location.pathname === "/analysis") load(tab, includeAuction);
   }, [location.pathname]); // eslint-disable-line
 
   return (
     <div className="h-full flex flex-col gap-6">
       {/* Tab 切换栏 */}
-      <div className="flex gap-1 bg-[var(--color-accent-bg)] p-1 rounded-[var(--radius-lg)] shrink-0">
+      <div className="flex gap-1 bg-[var(--color-accent-bg)] p-1 rounded-[var(--radius-lg)] shrink-0 items-center">
         {TAB_KEYS.map((key) => (
           <button
             key={key} type="button"
@@ -73,12 +78,23 @@ export default function AnalysisPage() {
             {t(`analysis.tabs.${key}`, lang)}
           </button>
         ))}
+        <label className="flex items-center gap-1.5 px-2 cursor-pointer shrink-0">
+          <input
+            type="checkbox"
+            checked={includeAuction}
+            onChange={(e) => setIncludeAuction(e.target.checked)}
+            className="accent-[var(--color-brand)] w-3 h-3"
+          />
+          <span className="text-xs text-[var(--color-text-secondary)]">
+            {lang === "zh" ? "含法拍" : "incl. Auction"}
+          </span>
+        </label>
       </div>
 
       {loading ? (
         <div className="flex-1 flex items-center justify-center"><Spinner size="lg" /></div>
       ) : (
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
           {tab === "overview" && <OverviewTab overview={overview} lang={lang} />}
           {tab === "map" && <MapTab data={mapData} lang={lang} />}
           {tab === "districts" && <DistrictsTab compare={compare} lang={lang} />}
@@ -105,27 +121,21 @@ function TrendsTab({ trends, lang }: { trends: PriceTrends | null; lang: string 
     en: { price_history: "Price History", listings: "List Date Est.", first_seen_at: "First Seen", none: "None" },
   };
 
-  // 构建含预测日期的 x 轴
   const dates = items.map((d) => d.date);
   const prices = items.map((d) => d.avg_unit_price);
   const sma7 = items.map((d) => d.sma_7 ?? undefined);
-  // 数据少于3天不预测（规则见后端 _predict_next_day）
   const hasPrediction = trends?.prediction_date != null && trends?.predicted_price != null && items.length >= 3;
 
   const allDates = hasPrediction ? [...dates, trends!.prediction_date!] : dates;
-  // 预测线: [前 n-1 天留空, 最后实际值(连线起点), 预测值(虚线终点)]
-  // 总长度 = n+1，与 allDates 严格对齐
   const predLine = hasPrediction
     ? [...Array(items.length - 1).fill(undefined), prices[prices.length - 1], trends!.predicted_price!]
     : [];
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col flex-1 min-h-0 gap-3">
       {empty && <EmptyHint text={t("analysis.noTrends", lang)} />}
-
-      {/* 预测提示 */}
       {hasPrediction && (
-        <div className="rounded-[var(--radius-md)] border border-[var(--color-brand)]/30 bg-[var(--color-brand)]/5 p-3 flex items-center gap-3">
+        <div className="shrink-0 rounded-[var(--radius-md)] border border-[var(--color-brand)]/30 bg-[var(--color-brand)]/5 p-3 flex items-center gap-3">
           <span className="text-lg">🔮</span>
           <div>
             <div className="text-xs font-semibold text-[var(--color-text-primary)]">
@@ -135,10 +145,8 @@ function TrendsTab({ trends, lang }: { trends: PriceTrends | null; lang: string 
           </div>
         </div>
       )}
-
-      {/* 日价格趋势线 */}
-      <div className={cardCls} style={cardStyle}>
-        <LineChart title={t("analysis.monthlyTrend", lang)} height={300}
+      <div className={`shrink-0 ${cardCls}`} style={cardStyle}>
+        <LineChart title={t("analysis.monthlyTrend", lang)} height={240}
           xData={allDates}
           series={[
             { name: t("analysis.avgUnitPrice", lang), data: [...prices, undefined], color: "#3d5a62" },
@@ -147,12 +155,10 @@ function TrendsTab({ trends, lang }: { trends: PriceTrends | null; lang: string 
           ]}
         />
       </div>
-
-      {/* 明细表 */}
       {!empty && (
-        <div className="overflow-x-auto rounded-[var(--radius-lg)] bg-[var(--color-surface)] text-[var(--color-text-primary)] border border-[var(--color-border-light)]" style={cardStyle}>
+        <div className="flex-1 min-h-0 overflow-auto rounded-[var(--radius-lg)] bg-[var(--color-surface)] text-[var(--color-text-primary)] border border-[var(--color-border-light)]" style={cardStyle}>
           <table className="w-full text-xs">
-            <thead><tr className="bg-[var(--color-brand)]">
+            <thead className="sticky top-0 z-10"><tr className="bg-[var(--color-brand)]">
               <th className="py-2 px-3 text-left font-medium text-[var(--color-text-inverse)] uppercase tracking-wider">{lang === "zh" ? "日期" : "Date"}</th>
               <th className="py-2 px-3 text-right font-medium text-[var(--color-text-inverse)] uppercase tracking-wider">{t("analysis.avgUnitPrice", lang)}</th>
               <th className="py-2 px-3 text-right font-medium text-[var(--color-text-inverse)] uppercase tracking-wider">{t("analysis.sma7", lang)}</th>
@@ -189,34 +195,20 @@ function TrendsTab({ trends, lang }: { trends: PriceTrends | null; lang: string 
 // ── 价格预测 Tab ──
 function PredictTab({ lang }: { lang: string }) {
   const [form, setForm] = useState<PredictRequest>({
-    district_id: 1,
-    area: 100,
-    room_count: 3,
-    hall_count: 2,
-    floor_level: "中楼层",
-    orientation: "南",
-    decoration: "精装",
-    building_type: null,
+    district_id: 1, area: 100, room_count: 3, hall_count: 2,
+    floor_level: "中楼层", orientation: "南", decoration: "精装", building_type: null,
   });
   const [result, setResult] = useState<PredictResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const handleSubmit = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const r = await fetchPrediction(form);
-      setResult(r);
-    } catch {
-      setError(lang === "zh" ? "预测失败，请检查数据是否充足" : "Prediction failed. Check data availability.");
-    } finally {
-      setLoading(false);
-    }
+    setLoading(true); setError("");
+    try { setResult(await fetchPrediction(form)); }
+    catch { setError(lang === "zh" ? "预测失败" : "Prediction failed."); }
+    finally { setLoading(false); }
   };
-
   const update = (k: keyof PredictRequest, v: any) => setForm((f) => ({ ...f, [k]: v }));
-
   const distName = DISTRICTS.find((d) => d.id === form.district_id)?.name ?? "";
   const confColors: Record<string, string> = {
     high: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400",
@@ -227,18 +219,13 @@ function PredictTab({ lang }: { lang: string }) {
     zh: { high: "高置信度", medium: "中置信度", low: "低置信度" },
     en: { high: "High", medium: "Medium", low: "Low" },
   };
-
-  // 统一 select 样式
   const selectCls = "w-full rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-primary)] px-2 py-1.5 text-xs hover:border-[var(--color-brand)]/50 focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]/30 focus:border-[var(--color-brand)] transition-all duration-[var(--duration-fast)]";
 
   return (
-    <div className="space-y-4">
-      {/* 表单 */}
-      <div className={cardCls} style={cardStyle}>
-        <h3 className="text-base font-semibold mb-4">
-          {lang === "zh" ? "选择房源条件" : "Select Criteria"}
-        </h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div className="flex flex-col flex-1 min-h-0 gap-3 overflow-y-auto">
+      <div className={`shrink-0 ${cardCls}`} style={cardStyle}>
+        <h3 className="text-sm font-semibold mb-3">{lang === "zh" ? "选择房源条件" : "Select Criteria"}</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           {/* 区县 */}
           <div>
             <label className="text-xs font-medium text-[var(--color-text-secondary)] block mb-1">{lang === "zh" ? "区县" : "District"}</label>
@@ -397,12 +384,11 @@ function PredictTab({ lang }: { lang: string }) {
 function OverviewTab({ overview, lang }: { overview: OverviewStats | null; lang: string }) {
   const o = overview;
   const total = o?.total_listings ?? 0;
-  // 按均价降序排列（方便横向柱状图阅读）
   const sortedRanking = [...(o?.district_ranking ?? [])].sort((a, b) => (b.avg_unit_price ?? 0) - (a.avg_unit_price ?? 0)).slice(0, 15);
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col flex-1 min-h-0 gap-2">
       {total === 0 && <EmptyHint text={t("analysis.noDataHint", lang)} />}
-      <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+      <div className="shrink-0 grid grid-cols-3 md:grid-cols-6 gap-2">
         <StatCard label={t("analysis.totalListings", lang)} value={total.toLocaleString()} />
         <StatCard label={t("analysis.avgPrice", lang)} value={o?.avg_total_price ? `${o.avg_total_price}${t("storage.priceUnit", lang)}` : "-"} />
         <StatCard label={t("analysis.medianPrice", lang)} value={o?.median_total_price ? `${o.median_total_price}${t("storage.priceUnit", lang)}` : "-"} />
@@ -410,54 +396,28 @@ function OverviewTab({ overview, lang }: { overview: OverviewStats | null; lang:
         <StatCard label={t("analysis.avgArea", lang)} value={o?.avg_area ? `${o.avg_area}㎡` : "-"} />
         <StatCard label={t("analysis.priceStd", lang)} value={o?.unit_price_std?.toLocaleString() ?? "0"} />
       </div>
-
-      {/* 城市/郊区分组均价 */}
       {o && (o.urban_count > 0 || o.suburb_count > 0) && (
-        <div className="rounded-[var(--radius-md)] border border-[var(--color-border-light)] bg-[var(--color-accent-bg)]/50 p-3">
-          <div className="flex items-center gap-4 text-xs">
-            <span className="font-medium text-[var(--color-text-secondary)]">{lang === "zh" ? "分组均价" : "By Region"}:</span>
-            {o.urban_count > 0 && (
-              <span className="text-[var(--color-text-primary)]">
-                🏙️ {lang === "zh" ? "主城" : "Urban"} <span className="font-bold text-[var(--color-brand)]">{o.urban_avg_unit_price?.toLocaleString() ?? "-"}</span> 元/㎡
-                <span className="text-[var(--color-text-tertiary)] ml-1">({o.urban_count.toLocaleString()} {lang === "zh" ? "套" : "units"}, {(o.urban_count/total*100).toFixed(0)}%)</span>
-              </span>
-            )}
-            {o.suburb_count > 0 && (
-              <span className="text-[var(--color-text-primary)]">
-                🏘️ {lang === "zh" ? "郊区" : "Suburb"} <span className="font-bold text-[var(--color-brand)]">{o.suburb_avg_unit_price?.toLocaleString() ?? "-"}</span> 元/㎡
-                <span className="text-[var(--color-text-tertiary)] ml-1">({o.suburb_count.toLocaleString()} {lang === "zh" ? "套" : "units"}, {(o.suburb_count/total*100).toFixed(0)}%)</span>
-              </span>
-            )}
-          </div>
+        <div className="shrink-0 rounded-[var(--radius-md)] border border-[var(--color-border-light)] bg-[var(--color-accent-bg)]/50 p-2 text-xs">
+          {o.urban_count > 0 && <span>🏙️ {lang === "zh" ? "主城" : "Urban"} <span className="font-bold">{o.urban_avg_unit_price?.toLocaleString() ?? "-"}</span> 元/㎡ ({o.urban_count.toLocaleString()}, {(o.urban_count/total*100).toFixed(0)}%)  </span>}
+          {o.suburb_count > 0 && <span>🏘️ {lang === "zh" ? "郊区" : "Suburb"} <span className="font-bold">{o.suburb_avg_unit_price?.toLocaleString() ?? "-"}</span> 元/㎡ ({o.suburb_count.toLocaleString()}, {(o.suburb_count/total*100).toFixed(0)}%)</span>}
         </div>
       )}
-
-      {/* 数据来源说明 */}
-      {total > 0 && (
-        <div className="text-[11px] text-[var(--color-text-tertiary)] leading-relaxed">
-          {lang === "zh"
-            ? "⚠️ 数据来源为 fang.com 挂牌房源，主城区房源占比偏高（约85%），郊区样本稀疏。全局均价 ≈ 主城均价 × 主城权重 + 郊区均价 × 郊区权重，当前更偏向主城区。实际全市均价应低于此数值。"
-            : "⚠️ Data from fang.com listings. Urban districts are overrepresented (~85%). The global average is weighted toward urban prices. Actual city-wide average is likely lower."}
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="shrink-0 grid grid-cols-1 md:grid-cols-2 gap-2">
         <div className={cardCls} style={cardStyle}>
-          <BarChart title={t("analysis.priceDistribution", lang)} height={220}
+          <BarChart title={t("analysis.priceDistribution", lang)} height={180}
             xData={o?.price_distribution?.map((d) => d.range_label) ?? []}
             series={[{ name: t("analysis.listingCount", lang), data: o?.price_distribution?.map((d) => d.count) ?? [], color: "#3d5a62" }]}
           />
         </div>
         <div className={cardCls} style={cardStyle}>
-          <PieChart title={t("analysis.decorationPie", lang)} height={220}
+          <PieChart title={t("analysis.decorationPie", lang)} height={180}
             data={o?.decoration_distribution?.map((d) => ({ name: d.label, value: d.count })) ?? []}
             roseType
           />
         </div>
       </div>
-
-      <div className={cardCls} style={cardStyle}>
-        <BarChart title={t("analysis.districtRanking", lang)} height={280}
+      <div className={`flex-1 min-h-0 ${cardCls}`} style={cardStyle}>
+        <BarChart title={t("analysis.districtRanking", lang)} height={0}
           xData={sortedRanking.map((d) => d.name)}
           series={[{ name: t("analysis.avgUnitPrice", lang), data: sortedRanking.map((d) => d.avg_unit_price ?? 0), color: "#6b838a" }]}
           horizontal
@@ -471,32 +431,32 @@ function OverviewTab({ overview, lang }: { overview: OverviewStats | null; lang:
 function DistrictsTab({ compare, lang }: { compare: DistrictCompareItem[]; lang: string }) {
   const empty = compare.length === 0;
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col flex-1 min-h-0 gap-3">
       {empty && <EmptyHint text={t("analysis.noDataHint", lang)} />}
-      <div className={cardCls} style={cardStyle}>
-        <BarChart title={t("analysis.districtBar", lang)} height={300}
+      <div className={`shrink-0 ${cardCls}`} style={cardStyle}>
+        <BarChart title={t("analysis.districtBar", lang)} height={240}
           xData={compare.map((d) => d.name)}
           series={[{ name: t("analysis.avgUnitPrice", lang), data: compare.map((d) => d.avg_unit_price ?? 0), color: "#3d5a62" }]}
         />
       </div>
       {!empty && (
-        <div className="overflow-x-auto rounded-[var(--radius-lg)] bg-[var(--color-surface)] text-[var(--color-text-primary)] border border-[var(--color-border-light)]" style={cardStyle}>
+        <div className="flex-1 min-h-0 overflow-auto rounded-[var(--radius-lg)] bg-[var(--color-surface)] text-[var(--color-text-primary)] border border-[var(--color-border-light)]" style={cardStyle}>
           <table className="w-full text-xs">
-            <thead><tr className="bg-[var(--color-brand)]">
-              <th className="py-2.5 px-3 text-left font-medium text-[var(--color-text-inverse)] uppercase tracking-wider">{t("analysis.thDistrict", lang)}</th>
-              <th className="py-2.5 px-3 text-right font-medium text-[var(--color-text-inverse)] uppercase tracking-wider">{t("analysis.thCount", lang)}</th>
-              <th className="py-2.5 px-3 text-right font-medium text-[var(--color-text-inverse)] uppercase tracking-wider">{t("analysis.thAvgPrice", lang)}</th>
-              <th className="py-2.5 px-3 text-right font-medium text-[var(--color-text-inverse)] uppercase tracking-wider">{t("analysis.thMedian", lang)}</th>
-              <th className="py-2.5 px-3 text-right font-medium text-[var(--color-text-inverse)] uppercase tracking-wider">{t("analysis.thStd", lang)}</th>
+            <thead className="sticky top-0 z-10"><tr className="bg-[var(--color-brand)]">
+              <th className="py-2 px-3 text-left font-medium text-[var(--color-text-inverse)] uppercase tracking-wider">{t("analysis.thDistrict", lang)}</th>
+              <th className="py-2 px-3 text-right font-medium text-[var(--color-text-inverse)] uppercase tracking-wider">{t("analysis.thCount", lang)}</th>
+              <th className="py-2 px-3 text-right font-medium text-[var(--color-text-inverse)] uppercase tracking-wider">{t("analysis.thAvgPrice", lang)}</th>
+              <th className="py-2 px-3 text-right font-medium text-[var(--color-text-inverse)] uppercase tracking-wider">{t("analysis.thMedian", lang)}</th>
+              <th className="py-2 px-3 text-right font-medium text-[var(--color-text-inverse)] uppercase tracking-wider">{t("analysis.thStd", lang)}</th>
             </tr></thead>
             <tbody>
               {compare.map((d, idx) => (
-                <tr key={d.name} className={`border-t border-[var(--color-border-light)] transition-colors ${idx % 2 === 1 ? "bg-[var(--color-accent-bg)]/40" : ""}`}>
-                  <td className="py-2 px-3">{d.name}</td>
-                  <td className="py-2 px-3 text-right">{d.count.toLocaleString()}</td>
-                  <td className="py-2 px-3 text-right font-medium text-[var(--color-brand)]">{d.avg_unit_price?.toLocaleString() ?? "-"}</td>
-                  <td className="py-2 px-3 text-right">{d.median_unit_price?.toLocaleString() ?? "-"}</td>
-                  <td className="py-2 px-3 text-right">{d.std_unit_price?.toLocaleString() ?? "-"}</td>
+                <tr key={d.name} className={`border-t border-[var(--color-border-light)] ${idx % 2 === 1 ? "bg-[var(--color-accent-bg)]/40" : ""}`}>
+                  <td className="py-1.5 px-3">{d.name}</td>
+                  <td className="py-1.5 px-3 text-right">{d.count.toLocaleString()}</td>
+                  <td className="py-1.5 px-3 text-right font-medium text-[var(--color-brand)]">{d.avg_unit_price?.toLocaleString() ?? "-"}</td>
+                  <td className="py-1.5 px-3 text-right">{d.median_unit_price?.toLocaleString() ?? "-"}</td>
+                  <td className="py-1.5 px-3 text-right">{d.std_unit_price?.toLocaleString() ?? "-"}</td>
                 </tr>
               ))}
             </tbody>
@@ -531,14 +491,14 @@ function FactorsTab({ importance, lang }: { importance: FeatureImportance | null
     label: lang === "zh" ? (FEATURE_LABEL_MAP[f.feature] ?? f.feature) : f.feature,
   }));
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col flex-1 min-h-0 gap-3">
       {empty && <EmptyHint text={t("analysis.noDataHint", lang)} />}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="shrink-0 grid grid-cols-2 gap-2">
         <StatCard label={t("analysis.sampleSize", lang)} value={(importance?.sample_size ?? 0).toLocaleString()} />
         <StatCard label={t("analysis.r2Score", lang)} value={importance?.r2_score != null ? importance.r2_score.toFixed(4) : "-"} />
       </div>
-      <div className={cardCls} style={cardStyle}>
-        <BarChart title={t("analysis.featureImportance", lang)} height={280}
+      <div className={`flex-1 min-h-0 ${cardCls}`} style={cardStyle}>
+        <BarChart title={t("analysis.featureImportance", lang)} height={0}
           xData={mapped.map((f) => f.label)}
           series={[{ name: t("analysis.importancePct", lang), data: mapped.map((f) => f.pct), color: "#bdbdca" }]}
           horizontal
@@ -560,25 +520,25 @@ function FactorsTab({ importance, lang }: { importance: FeatureImportance | null
 function ClustersTab({ cluster, lang }: { cluster: ClusterResult | null; lang: string }) {
   const empty = !cluster || cluster.sample_size === 0;
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col flex-1 min-h-0 gap-2">
       {empty && <EmptyHint text={t("analysis.noDataHint", lang)} />}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+      <div className="shrink-0 flex gap-2 overflow-x-auto">
         {(cluster?.clusters ?? []).map((c) => (
-          <div key={c.id} className={`${cardCls} text-center !p-3`} style={cardStyle}>
+          <div key={c.id} className={`${cardCls} text-center !p-2 flex-1 min-w-[8rem]`} style={cardStyle}>
             <div className="text-sm font-bold text-[var(--color-brand)]">{c.label}</div>
-            <div className="text-xs text-[var(--color-text-secondary)]">{c.size.toLocaleString()} {t("analysis.units", lang)} ({c.pct}%)</div>
-            <div className="text-xs mt-1">{t("analysis.avgPriceLabel", lang)} {c.avg_unit_price.toLocaleString()}</div>
-            <div className="text-xs text-[var(--color-text-secondary)]">{c.avg_area}㎡ / {c.avg_floors}{t("analysis.floors", lang)}</div>
+            <div className="text-xs text-[var(--color-text-secondary)]">{c.size.toLocaleString()} ({c.pct}%)</div>
+            <div className="text-xs mt-0.5">{c.avg_unit_price.toLocaleString()} 元/㎡</div>
+            <div className="text-xs text-[var(--color-text-secondary)]">{c.avg_area}㎡</div>
           </div>
         ))}
       </div>
-      <div className={cardCls} style={cardStyle}>
-        <ScatterChart title={t("analysis.clusterScatter", lang)} height={300}
+      <div className={`flex-1 min-h-0 ${cardCls}`} style={cardStyle}>
+        <ScatterChart title={t("analysis.clusterScatter", lang)} height={0}
           data={cluster?.scatter ?? []}
           clusters={(cluster?.clusters ?? []).map((c) => ({ id: c.id, label: c.label }))}
         />
       </div>
-      <p className="text-xs text-[var(--color-text-secondary)]">{t("analysis.pcaVariance", lang)}: {cluster ? (cluster.pca_variance * 100).toFixed(1) : "0.0"}%</p>
+      <p className="shrink-0 text-xs text-[var(--color-text-secondary)]">PCA: {cluster ? (cluster.pca_variance * 100).toFixed(1) : "0.0"}%</p>
     </div>
   );
 }
@@ -587,23 +547,21 @@ function ClustersTab({ cluster, lang }: { cluster: ClusterResult | null; lang: s
 function MapTab({ data, lang }: { data: MapPriceItem[]; lang: string }) {
   if (data.length === 0) return <EmptyHint text={t("analysis.noMapData", lang)} />;
   const sorted = [...data].sort((a, b) => b.value - a.value);
-  const maxPrice = sorted[0];
-  const minPrice = sorted[sorted.length - 1];
-  // 加权平均 = Σ(区均价 × 房源数) / Σ(房源数)，与 Overview 全局均价算法一致
   const totalListings = sorted.reduce((s, d) => s + (d.count ?? 0), 0);
   const weightedSum = sorted.reduce((s, d) => s + d.value * (d.count ?? 0), 0);
   const avgAll = totalListings > 0 ? Math.round(weightedSum / totalListings) : 0;
+  const maxPrice = sorted[0], minPrice = sorted[sorted.length - 1];
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+    <div className="flex flex-col flex-1 min-h-0 gap-2">
+      <div className="shrink-0 grid grid-cols-2 md:grid-cols-4 gap-2">
         <MiniStat label={t("analysis.totalListings", lang)} value={totalListings.toLocaleString()} />
         <MiniStat label={t("analysis.avgUnitPrice", lang)} value={avgAll.toLocaleString()} />
         <MiniStat label={t("analysis.maxPrice", lang)} value={maxPrice ? `${maxPrice.value.toLocaleString()} (${maxPrice.name})` : "-"} />
         <MiniStat label={t("analysis.minPrice", lang)} value={minPrice ? `${minPrice.value.toLocaleString()} (${minPrice.name})` : "-"} />
       </div>
-      <div className={cardCls} style={cardStyle}>
-        <MapChart data={data} height={460} lang={lang} />
+      <div className={`flex-1 min-h-0 ${cardCls}`} style={cardStyle}>
+        <MapChart data={data} height={0} lang={lang} />
       </div>
     </div>
   );

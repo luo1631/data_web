@@ -35,8 +35,14 @@ async def run_periodic_update():
     # 2. 增量爬取
     await run_weekly_incremental_crawl()
 
+    # 3. 价格趋势刷新（爬取产生了新数据）
+    try:
+        from analytics.trends import compute_and_cache
+        await compute_and_cache()
+        logger.info("[Scheduler] 价格趋势缓存已刷新")
+    except Exception as e:
+        logger.error(f"[Scheduler] 趋势刷新失败: {e}")
 
-# ── 公开入口（供 main.py 的 APScheduler 调用）──
 
 async def run_weekly_incremental_crawl():
     """每周增量爬取任务入口。
@@ -122,20 +128,32 @@ async def run_daily_listing_age_update():
     """每日更新所有活跃房源的 listing_age_days 字段。
 
     每天凌晨 3:00 执行，使用单次 SQL 批量更新（避免 N+1）。
+    优先使用 listing_date，缺失时回退到 first_seen_at。
     """
     logger.info("[Scheduler] listing_age_days 每日更新触发")
     async with async_session() as db:
-        # 单次批量 UPDATE: listing_age_days = julianday('now') - julianday(listing_date)
         from sqlalchemy import text
-        result = await db.execute(
+        # 有 listing_date 的
+        result1 = await db.execute(
             text("""
                 UPDATE listings
                 SET listing_age_days = CAST(julianday('now') - julianday(listing_date) AS INTEGER)
                 WHERE status = 'active' AND listing_date IS NOT NULL
             """)
         )
+        # 无 listing_date 的，用 first_seen_at 推算
+        result2 = await db.execute(
+            text("""
+                UPDATE listings
+                SET listing_age_days = CAST(julianday('now') - julianday(first_seen_at) AS INTEGER)
+                WHERE status = 'active' AND listing_date IS NULL AND first_seen_at IS NOT NULL
+            """)
+        )
         await db.commit()
-        logger.info(f"[Scheduler] listing_age_days 刷新完成: {result.rowcount} 条")
+        logger.info(
+            f"[Scheduler] listing_age_days 刷新完成: "
+            f"{result1.rowcount} (by listing_date) + {result2.rowcount} (by first_seen_at)"
+        )
 
 
 async def resume_incomplete_batches():

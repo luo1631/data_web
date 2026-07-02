@@ -18,21 +18,25 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 @router.get("/overview")
 async def analytics_overview(
     district_id: int | None = Query(None, description="区县 ID"),
+    include_court_auction: bool = Query(True, description="是否包含法拍房数据"),
     db: AsyncSession = Depends(get_db),
 ):
     """分析总览 — 包含各区县排名的全维度描述性统计。"""
     try:
-        data = await get_overview_stats(db, district_id=district_id)
+        data = await get_overview_stats(db, district_id=district_id, include_court_auction=include_court_auction)
         return ok(data=data)
     except Exception as e:
         return error(code=500, message=str(e))
 
 
 @router.get("/district-compare")
-async def district_compare(db: AsyncSession = Depends(get_db)):
+async def district_compare(
+    include_court_auction: bool = Query(True),
+    db: AsyncSession = Depends(get_db),
+):
     """区县对比 — 每个区县的均价、中位数、标准差。"""
     try:
-        data = await get_district_compare(db)
+        data = await get_district_compare(db, include_court_auction=include_court_auction)
         return ok(data=data)
     except Exception as e:
         return error(code=500, message=str(e))
@@ -41,11 +45,12 @@ async def district_compare(db: AsyncSession = Depends(get_db)):
 @router.get("/price-distribution")
 async def price_distribution(
     district_id: int | None = Query(None),
+    include_court_auction: bool = Query(True),
     db: AsyncSession = Depends(get_db),
 ):
     """价格分布 — 价格段、面积段、房龄段分布（复用 overview 的子集）。"""
     try:
-        full = await get_overview_stats(db, district_id=district_id)
+        full = await get_overview_stats(db, district_id=district_id, include_court_auction=include_court_auction)
         return ok(data={
             "total": full["total_listings"],
             "price_distribution": full["price_distribution"],
@@ -59,11 +64,12 @@ async def price_distribution(
 @router.get("/feature-importance")
 async def feature_importance(
     district_id: int | None = Query(None),
+    include_court_auction: bool = Query(True),
     db: AsyncSession = Depends(get_db),
 ):
     """特征重要性 — RandomForest 模型输出特征权重排序。"""
     try:
-        data = await analyze_feature_importance(db, district_id=district_id)
+        data = await analyze_feature_importance(db, district_id=district_id, include_court_auction=include_court_auction)
         return ok(data=data)
     except Exception as e:
         return error(code=500, message=str(e))
@@ -72,11 +78,12 @@ async def feature_importance(
 @router.get("/clusters")
 async def clusters(
     district_id: int | None = Query(None),
+    include_court_auction: bool = Query(True),
     db: AsyncSession = Depends(get_db),
 ):
     """聚类分析 — K-Means 房源画像 + PCA 2D 散点图。"""
     try:
-        data = await get_clusters(db, district_id=district_id)
+        data = await get_clusters(db, district_id=district_id, include_court_auction=include_court_auction)
         return ok(data=data)
     except Exception as e:
         return error(code=500, message=str(e))

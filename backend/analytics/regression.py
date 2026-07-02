@@ -28,7 +28,7 @@ CATEGORICAL_FEATURES = [
 
 
 async def analyze_feature_importance(
-    db: AsyncSession, district_id: int | None = None
+    db: AsyncSession, district_id: int | None = None, include_court_auction: bool = True
 ) -> dict:
     """RandomForest 特征重要性分析。
 
@@ -56,6 +56,9 @@ async def analyze_feature_importance(
     if district_id is not None:
         stmt = stmt.where(Listing.district_id == district_id)
 
+    if not include_court_auction:
+        stmt = stmt.where(Listing.listing_type == "regular")
+
     result = await db.execute(stmt)
     rows = result.all()
     if not rows:
@@ -70,7 +73,10 @@ async def analyze_feature_importance(
     ]
     df = pd.DataFrame(rows, columns=cols)
 
-    # 清洗：填充缺失值
+    # ── 类型转换：SQLAlchemy Decimal → float ──
+    df["unit_price"] = df["unit_price"].astype(float)
+    for c in NUMERIC_FEATURES:
+        df[c] = df[c].astype(float)
     for c in NUMERIC_FEATURES:
         df[c] = df[c].fillna(df[c].median() if not df[c].isna().all() else 0)
     for c in CATEGORICAL_FEATURES:

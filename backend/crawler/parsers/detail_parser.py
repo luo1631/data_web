@@ -173,7 +173,12 @@ class DetailParser:
 
     def _extract_address(self, soup):
         el = soup.select_one(".address, .plot-address, .map-address, .lp-map-btxt, .showMapList")
-        return el.get_text(strip=True) if el else None
+        if el:
+            return el.get_text(strip=True)
+        # 纯文本兜底：含区县名的长文本
+        full = soup.get_text(" ", strip=True)
+        m = re.search(r'(?:重庆)?(?:两江新区|渝中|南岸|沙坪坝|九龙坡|巴南|大渡口|北碚|璧山|江津|永川|合川|长寿|涪陵|南川|綦江|大足|铜梁|潼南|荣昌|万州|开州|梁平|武隆|城口|丰都|垫江|忠县|云阳|奉节|巫山|巫溪|黔江|石柱|秀山|酉阳|彭水)\S{0,50}', full)
+        return m.group(0) if m else None
 
     def _extract_listing_date(self, soup):
         full = soup.get_text(" ", strip=True)

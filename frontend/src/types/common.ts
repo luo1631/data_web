@@ -38,6 +38,7 @@ export interface Listing {
   title: string | null;
   district_id: number | null;
   community_name: string | null;
+  listing_type: string;  // "regular" | "court_auction"
   total_price: number | null;
   unit_price: number | null;
   area: number | null;
@@ -75,6 +76,7 @@ export interface ListingDetail extends Listing {
 
 export interface ListingFilter {
   district_id?: number;
+  listing_type?: string;  // "regular" | "court_auction"
   min_price?: number;
   max_price?: number;
   min_unit_price?: number;
@@ -165,7 +167,8 @@ export interface CrawlBatch {
   error_summary: string | null;
   started_at: string | null;
   finished_at: string | null;
-  tasks: CrawlTask[];
+  district_names: string[];     // 预计算：所属区县名称列表
+  total_pages: number;          // 预计算：已完成任务的总翻页数
 }
 
 export interface CrawlProgress {

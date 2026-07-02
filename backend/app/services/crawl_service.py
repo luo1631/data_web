@@ -160,44 +160,50 @@ async def get_crawl_progress(batch_id: int, db: AsyncSession) -> CrawlProgress |
 
 
 async def get_batches(db: AsyncSession) -> list[CrawlBatchRead]:
-    result = await db.execute(select(CrawlBatch).order_by(desc(CrawlBatch.id)).limit(20))
+    """历史批次列表（最近 18 条）— 使用聚合查询替代加载全部 task 行。"""
+    result = await db.execute(
+        select(CrawlBatch).order_by(desc(CrawlBatch.id)).limit(18)
+    )
     batches = result.scalars().all()
     batch_ids = [b.id for b in batches]
 
-    # 批量加载 tasks + JOIN district 名
-    tasks_by_batch: dict[int, list[tuple]] = {b.id: [] for b in batches}
+    # 轻量聚合查询：仅取 batch_id / district_name / status / page 范围
+    districts_by_batch: dict[int, list[str]] = {b.id: [] for b in batches}
+    pages_by_batch: dict[int, int] = {b.id: 0 for b in batches}
+
     if batch_ids:
         tr = await db.execute(
-            select(CrawlTask, District.name).outerjoin(
+            select(
+                CrawlTask.batch_id,
+                CrawlTask.status,
+                CrawlTask.page_start,
+                CrawlTask.page_end,
+                District.name,
+            ).outerjoin(
                 District, CrawlTask.district_id == District.id
             ).where(CrawlTask.batch_id.in_(batch_ids))
         )
-        for t, d_name in tr.all():
-            tasks_by_batch.setdefault(t.batch_id, []).append((t, d_name))
+        for row_bid, row_status, row_start, row_end, row_dname in tr.all():
+            if row_dname:
+                districts_by_batch.setdefault(row_bid, []).append(row_dname)
+            if row_status == "completed":
+                pages_by_batch[row_bid] += (row_end or 1) - (row_start or 1) + 1
 
-    output = []
-    for batch in batches:
-        task_rows = tasks_by_batch.get(batch.id, [])
-        output.append(CrawlBatchRead(
-            id=batch.id, type=batch.type or "full", status=batch.status or "pending",
-            total_tasks=batch.total_tasks or 0,
-            completed_tasks=batch.completed_tasks or 0,
-            new_listings=batch.new_listings or 0,
-            updated_listings=batch.updated_listings or 0,
-            removed_listings=batch.removed_listings or 0,
-            error_summary=batch.error_summary,
-            started_at=batch.started_at, finished_at=batch.finished_at,
-            tasks=[CrawlTaskRead(
-                id=t.id, district_id=t.district_id,
-                district_name=d_name,
-                status=t.status or "pending",
-                page_start=t.page_start or 1, page_end=t.page_end,
-                listings_found=t.listings_found or 0,
-                error_message=t.error_message,
-                started_at=t.started_at, finished_at=t.finished_at,
-            ).model_dump() for t, d_name in task_rows],
-        ))
-    return output
+    return [
+        CrawlBatchRead(
+            id=b.id, type=b.type or "full", status=b.status or "pending",
+            total_tasks=b.total_tasks or 0,
+            completed_tasks=b.completed_tasks or 0,
+            new_listings=b.new_listings or 0,
+            updated_listings=b.updated_listings or 0,
+            removed_listings=b.removed_listings or 0,
+            error_summary=b.error_summary,
+            started_at=b.started_at, finished_at=b.finished_at,
+            district_names=districts_by_batch.get(b.id, []),
+            total_pages=pages_by_batch.get(b.id, 0),
+        )
+        for b in batches
+    ]
 
 
 async def generate_sse_events(batch_id: int, session_factory: async_sessionmaker):

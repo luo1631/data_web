@@ -26,16 +26,16 @@ def _evict_lru(cache: OrderedDict, max_size: int) -> None:
 
 
 async def get_overview_stats(
-    db: AsyncSession, district_id: int | None = None
+    db: AsyncSession, district_id: int | None = None, include_court_auction: bool = True
 ) -> dict:
     """全量概览统计（60s TTL 缓存，LRU 淘汰）。"""
-    cache_key = f"overview_{district_id}"
+    cache_key = f"overview_{district_id}_{include_court_auction}"
     now = time.time()
     cached = _OVERVIEW_CACHE.get(cache_key)
     if cached and (now - cached[0]) < _CACHE_TTL:
         return cached[1]
 
-    result = await _compute_overview_stats(db, district_id)
+    result = await _compute_overview_stats(db, district_id, include_court_auction)
     # LRU: 先删旧 key 再插入（更新位置）
     _OVERVIEW_CACHE.pop(cache_key, None)
     _OVERVIEW_CACHE[cache_key] = (now, result)
@@ -43,13 +43,13 @@ async def get_overview_stats(
     return result
 
 
-async def get_district_compare(db: AsyncSession) -> list[dict]:
+async def get_district_compare(db: AsyncSession, include_court_auction: bool = True) -> list[dict]:
     """区县对比分析（60s TTL 缓存）。"""
     now = time.time()
     if _COMPARE_CACHE[0] and (now - _COMPARE_CACHE[0]) < _CACHE_TTL:
         return _COMPARE_CACHE[1]
 
-    result = await _compute_district_compare(db)
+    result = await _compute_district_compare(db, include_court_auction)
     _COMPARE_CACHE[0] = now
     _COMPARE_CACHE[1] = result
     return result
@@ -91,12 +91,14 @@ AGE_BINS = [
 
 
 async def _compute_overview_stats(
-    db: AsyncSession, district_id: int | None = None
+    db: AsyncSession, district_id: int | None = None, include_court_auction: bool = True
 ) -> dict:
     """全量概览统计（内部实现，无缓存）。"""
     base = [Listing.status == "active"]
     if district_id is not None:
         base.append(Listing.district_id == district_id)
+    if not include_court_auction:
+        base.append(Listing.listing_type == "regular")
     cond = and_(*base)
 
     # 基础聚合（过滤空值和零值脏数据）
@@ -206,12 +208,12 @@ async def _compute_overview_stats(
     }
 
 
-async def _compute_district_compare(db: AsyncSession) -> list[dict]:
-    """区县对比分析 — 每个区县的均价、中位数、标准差、房源数。（内部实现）
+async def _compute_district_compare(db: AsyncSession, include_court_auction: bool = True) -> list[dict]:
+    """区县对比分析 — 每个区县的均价、中位数、标准差、房源数。（内部实现）"""
+    base_cond = [Listing.status == "active"]
+    if not include_court_auction:
+        base_cond.append(Listing.listing_type == "regular")
 
-    优化: 一次查询获取所有 (district_name, unit_price) 对，Python 侧分组计算
-          中位数和标准差，避免 N+1 查询。
-    """
     rows = await db.execute(
         select(
             District.name,
@@ -220,16 +222,19 @@ async def _compute_district_compare(db: AsyncSession) -> list[dict]:
             func.avg(Listing.total_price).label("avg_t"),
             func.avg(Listing.unit_price).label("avg_u"),
         ).join(Listing, Listing.district_id == District.id)
-        .where(Listing.status == "active")
+        .where(and_(*base_cond))
         .group_by(District.name)
         .order_by(func.avg(Listing.unit_price).desc())
     )
 
     # 一次查询获取所有区县的 unit_price 对
+    cond2 = [Listing.status == "active", Listing.unit_price.isnot(None)]
+    if not include_court_auction:
+        cond2.append(Listing.listing_type == "regular")
     all_prices = await db.execute(
         select(District.name, Listing.unit_price)
         .join(Listing, Listing.district_id == District.id)
-        .where(Listing.status == "active", Listing.unit_price.isnot(None))
+        .where(and_(*cond2))
     )
     price_map: dict[str, list[float]] = {}
     for name, up in all_prices.all():

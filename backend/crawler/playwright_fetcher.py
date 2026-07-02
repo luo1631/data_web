@@ -23,8 +23,11 @@ PAGE_LOAD_TIMEOUT = 30_000
 ELEMENT_WAIT_TIMEOUT = 10_000
 MIN_PAGE_DELAY = 1.5
 MAX_PAGE_DELAY = 3.0
+CAPTCHA_EXTRA_DELAY = 8.0     # 被反爬时额外等待
+PROGRESSIVE_DELAY_PER_10 = 0.5 # 每 10 页加 0.5s
 NAVIGATE_RETRIES = 3
 NAVIGATE_RETRY_DELAY = 2.0
+NAVIGATE_RETRY_BACKOFF = 4.0    # 每次重试前额外等待（指数增长: 2s, 6s, 10s）
 
 
 class PlaywrightFetcher:
@@ -99,8 +102,12 @@ class PlaywrightFetcher:
                 url = DISTRICT_LIST_PAGE_URL.format(code=fang_code, page=str(page))
         else:
             url = SEED_URL if page <= 1 else DISTRICT_LIST_PAGE_URL.format(code="", page=str(page))  # won't work for global
-        await self._rate_limit()
+        await self._rate_limit(page=page)
         html = await self._navigate(url)
+        # 检测验证码页：遇到则额外等待，让后续请求降速
+        if self.is_captcha_page(html):
+            logger.warning(f"Captcha page detected at page {page} ({fang_code}), waiting extra {CAPTCHA_EXTRA_DELAY}s")
+            await asyncio.sleep(CAPTCHA_EXTRA_DELAY)
         return html, url
 
     async def _navigate(self, url: str) -> str:
@@ -128,7 +135,9 @@ class PlaywrightFetcher:
                 logger.warning(f"Navigate attempt {attempt}/{NAVIGATE_RETRIES} failed: {e}")
 
             if attempt < NAVIGATE_RETRIES:
-                await asyncio.sleep(NAVIGATE_RETRY_DELAY)
+                wait = NAVIGATE_RETRY_DELAY + attempt * NAVIGATE_RETRY_BACKOFF
+                logger.info(f"  waiting {wait:.0f}s before retry {attempt+1}/{NAVIGATE_RETRIES}")
+                await asyncio.sleep(wait)
 
         logger.error(f"All {NAVIGATE_RETRIES} navigate attempts failed for {url}: {last_error}")
         try:
@@ -143,10 +152,36 @@ class PlaywrightFetcher:
         except Exception as e:
             logger.warning(f"Seed failed: {e}")
 
-    async def _rate_limit(self) -> None:
+    async def _rate_limit(self, page: int = 1, captcha_encountered: bool = False) -> None:
+        """翻页限速：基础延迟 + 翻页渐进增量 + 验证码惩罚。
+
+        page: 当前页码，页数越高延迟越大（模拟人类浏览速度衰减）
+        captcha_encountered: 是否刚遇到验证码，需要额外等待
+        """
         now = asyncio.get_running_loop().time()
         elapsed = now - self._last_request_time
-        target = random.uniform(MIN_PAGE_DELAY, MAX_PAGE_DELAY)
+
+        # 基础随机延迟
+        base = random.uniform(MIN_PAGE_DELAY, MAX_PAGE_DELAY)
+        # 翻页渐进：每 10 页加 PROGRESSIVE_DELAY_PER_10 秒
+        progressive = (page // 10) * PROGRESSIVE_DELAY_PER_10
+        # 验证码惩罚
+        captcha_penalty = CAPTCHA_EXTRA_DELAY if captcha_encountered else 0
+
+        target = base + progressive + captcha_penalty
         if elapsed < target:
             await asyncio.sleep(target - elapsed)
         self._last_request_time = asyncio.get_running_loop().time()
+
+    @staticmethod
+    def is_captcha_page(html: str) -> bool:
+        """检测页面是否为 fang.com 滑块验证码页面。"""
+        if not html:
+            return False
+        if len(html) < 2000 and ("请完成下列验证" in html or "slider" in html):
+            return True
+        if "请完成下列验证后继续" in html:
+            return True
+        if "checkyzm" in html and len(html) < 5000:
+            return True
+        return False

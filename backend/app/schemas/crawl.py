@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 class CrawlStartRequest(BaseModel):
     """启动爬取请求"""
-    max_pages_per_district: int = Field(30, ge=1, le=100, description="全局最大翻页数")
+    max_pages_per_district: int = Field(100, ge=1, le=200, description="每区县最大翻页数")
 
 
 # ── 响应体 ──
@@ -30,7 +30,7 @@ class CrawlTaskRead(BaseModel):
 
 
 class CrawlBatchRead(BaseModel):
-    """爬取批次"""
+    """爬取批次（轻量版 — 不含完整 task 明细，用聚合字段替代）"""
     id: int
     type: str
     status: str
@@ -42,7 +42,9 @@ class CrawlBatchRead(BaseModel):
     error_summary: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
-    tasks: list[CrawlTaskRead] = []    # 关联的任务明细
+    # 聚合：区县名称列表 + 总翻页数（由 SQL 聚合查询在 service 层填充）
+    district_names: list[str] = []
+    total_pages: int = 0
 
     model_config = {"from_attributes": True}
 

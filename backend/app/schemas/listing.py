@@ -12,6 +12,7 @@ class ListingRead(BaseModel):
     title: str | None = None
     district_id: int | None = None
     community_name: str | None = None
+    listing_type: str = "regular"  # "regular" | "court_auction"
     total_price: float | None = None
     unit_price: float | None = None
     area: float | None = None
@@ -70,6 +71,7 @@ class ListingFilter(BaseModel):
     decoration: str | None = Field(None, description="装修情况")
     orientation: str | None = Field(None, description="朝向")
     floor_level: str | None = Field(None, description="楼层")
+    listing_type: str | None = Field(None, description="房源类型: regular/court_auction，默认全部")
     status: str | None = Field("active", description="房源状态")
     keyword: str | None = Field(None, description="标题/小区名搜索")
     sort_by: str = Field("id", description="排序字段")

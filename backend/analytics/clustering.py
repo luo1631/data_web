@@ -19,11 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.listing import Listing
 
-# K 值搜索范围
-K_MIN, K_MAX = 3, 8
+# K 值搜索范围（最少 5 个以提供足够细分的房源画像）
+K_MIN, K_MAX = 5, 8
 
 
-async def get_clusters(db: AsyncSession, district_id: int | None = None) -> dict:
+async def get_clusters(db: AsyncSession, district_id: int | None = None, include_court_auction: bool = True) -> dict:
     """K-Means 聚类 + PCA。
 
     使用肘部法则从 [K_MIN, K_MAX] 范围内选择最佳 K 值。
@@ -50,6 +50,9 @@ async def get_clusters(db: AsyncSession, district_id: int | None = None) -> dict
     if district_id is not None:
         stmt = stmt.where(Listing.district_id == district_id)
 
+    if not include_court_auction:
+        stmt = stmt.where(Listing.listing_type == "regular")
+
     result = await db.execute(stmt)
     rows = result.all()
     if not rows:
@@ -58,7 +61,10 @@ async def get_clusters(db: AsyncSession, district_id: int | None = None) -> dict
     cols = ["unit_price", "area", "room_count", "decoration", "total_floors", "listing_age_days"]
     df = pd.DataFrame(rows, columns=cols)
 
-    # ── 清洗 ──
+    # ── 类型转换：SQLAlchemy 返回的 Decimal 需要显式转 float ──
+    df["unit_price"] = df["unit_price"].astype(float)
+    df["area"] = df["area"].astype(float)
+    df["room_count"] = df["room_count"].astype(float)
     df["area"] = df["area"].fillna(df["area"].median())
     df["room_count"] = df["room_count"].fillna(2)
     # 装修编码
@@ -84,7 +90,7 @@ async def get_clusters(db: AsyncSession, district_id: int | None = None) -> dict
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    # ── 肘部法则选择最佳 K ──
+    # ── 肘部法则 + 轮廓系数联合选择最佳 K ──
     max_k = min(K_MAX, len(df) - 1)
     min_k = min(K_MIN, max_k)
     inertias = []
@@ -93,7 +99,23 @@ async def get_clusters(db: AsyncSession, district_id: int | None = None) -> dict
         km.fit(X_scaled)
         inertias.append((k, km.inertia_))
 
-    N = _elbow_k(inertias, min_k, max_k)
+    # 从肘部法则取出前 3 个候选 K，再用轮廓系数精选
+    elbow_candidates = _elbow_candidates(inertias, min_k, max_k)
+
+    if len(elbow_candidates) > 1:
+        # 对候选 K 值跑 silhouette_score，选最高分
+        best_k = min_k
+        best_score = -1
+        for k in elbow_candidates:
+            km = KMeans(n_clusters=k, random_state=42, n_init=10)
+            labels = km.fit_predict(X_scaled)
+            score = silhouette_score(X_scaled, labels, sample_size=min(2000, len(X_scaled)))
+            if score > best_score:
+                best_score = score
+                best_k = k
+        N = best_k
+    else:
+        N = elbow_candidates[0] if elbow_candidates else min_k
 
     kmeans = KMeans(n_clusters=N, random_state=42, n_init=10)
     labels = kmeans.fit_predict(X_scaled)
@@ -135,55 +157,74 @@ async def get_clusters(db: AsyncSession, district_id: int | None = None) -> dict
     }
 
 
-def _elbow_k(inertias: list[tuple[int, float]], k_min: int, k_max: int) -> int:
-    """简易肘部法则：找 inertia 下降曲线的拐点。
+def _elbow_candidates(inertias: list[tuple[int, float]], k_min: int, k_max: int) -> list[int]:
+    """肘部法则：返回惯性下降的拐点候选（前 3 个），供轮廓系数精选。
 
-    如果拐点不明确（样本太少），回退到 k_min。
+    拐点 = 加速度（二阶差分）最大的 K 值。
+    如果拐点不明确，返回 [k_min, k_min+1, ..., 至多 k_max]。
     """
     if len(inertias) <= 2:
-        return k_min
+        return [k_min]
 
     vals = [v for _, v in inertias]
-    # 计算二阶差分（加速度），拐点 = 加速度变化最大的位置
     deltas = [vals[i] - vals[i + 1] for i in range(len(vals) - 1)]
     if len(deltas) <= 1:
-        return k_min
+        return [k_min, min(k_min + 1, k_max)]
 
     accels = [deltas[i] - deltas[i + 1] for i in range(len(deltas) - 1)]
     if not accels or max(accels) <= 0:
-        return k_min
+        # 无明确拐点时返回中间几个 K 值
+        mid = (k_min + k_max) // 2
+        return sorted(set([k_min, mid, k_max]))
 
-    best_idx = accels.index(max(accels))
-    return k_min + best_idx + 1
+    # 按加速度降序排列，取前 3 个候选
+    indexed = sorted(enumerate(accels), key=lambda x: x[1], reverse=True)
+    candidates = []
+    for idx, _ in indexed[:3]:
+        k = k_min + idx + 1
+        if k_min <= k <= k_max:
+            candidates.append(k)
+    # 确保至少包含 k_min 和 k_max
+    if k_min not in candidates:
+        candidates.append(k_min)
+    if k_max not in candidates:
+        candidates.append(k_max)
+    return sorted(set(candidates))
 
 
 def _auto_label(row: pd.DataFrame, global_price_80: float) -> str:
-    """根据聚类中心的物理属性自动生成标签。"""
+    """根据聚类中心的物理属性自动生成标签。
+
+    标签格式: [价位][户型档][/楼层]
+    价位: 经济/品质/改善/豪宅
+    户型档: 小户型/中等户型/大户型
+    楼层: 高层(≥20层)/多层(≤7层)，中间地带不附加
+    """
     area = float(row["area"].mean())
     price = float(row["unit_price"].mean())
-    age = float(row["listing_age_days"].mean())
     floors = float(row["total_floors"].mean())
-    rooms = float(row["room_count"].mean())
 
-    age_years = age / 365.0
-
-    # 按面积+价格区分档次（价格对比全局 80 分位）
-    if area >= 130 and price >= global_price_80:
-        base = "大户型改善"
-    elif area >= 100:
-        base = "中等户型"
-    elif area >= 60:
-        base = "刚需户型"
+    # 价位（对比全局 80 分位）
+    if price >= global_price_80 * 1.5:
+        price_tier = "豪宅"
+    elif price >= global_price_80:
+        price_tier = "改善"
+    elif price >= global_price_80 * 0.7:
+        price_tier = "品质"
     else:
-        base = "小户型"
+        price_tier = "经济"
 
-    # 附加房龄/楼层信息
-    if age_years <= 5:
-        base = "次新" + base
-    elif age_years >= 15:
-        base = "老旧" + base
+    # 户型档
+    if area >= 130:
+        area_tier = "大户型"
+    elif area >= 80:
+        area_tier = "中等户型"
+    else:
+        area_tier = "小户型"
 
-    # 高层 vs 多层
+    base = f"{price_tier}{area_tier}"
+
+    # 楼层
     if floors >= 20:
         base += "/高层"
     elif floors <= 7:

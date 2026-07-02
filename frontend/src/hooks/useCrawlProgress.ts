@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback } from "react";
 import { useCrawlStore } from "../stores/useCrawlStore";
 import {
   createCrawlSSE, startCrawl, stopCrawl,
@@ -51,8 +51,8 @@ export function useCrawlProgress() {
     return batches;
   }, [store]);
 
-  // 自动重连一次
-  useEffect(() => { reconnect(); }, []); // eslint-disable-line
+  // 注意：不在 mount 时自动调用 reconnect()。
+  // CrawlPage 会在 useEffect 中显式调用，避免重复请求 /crawl/batches API。
 
   return {
     activeBatchId: store.activeBatchId,

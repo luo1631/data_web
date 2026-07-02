@@ -30,7 +30,7 @@ export default function ScatterChart({ title, data, clusters = [], height = 350 
     title: title ? { text: title, left: "center", textStyle: { fontSize: 13, color: isDark ? "#e0e0e0" : "#333" } } : undefined,
     tooltip: { trigger: "item" as const, formatter: (p: any) => `${p.seriesName}<br/>(${p.value[0].toFixed(2)}, ${p.value[1].toFixed(2)})` },
     legend: { bottom: 0, textStyle: { color: isDark ? "#aaa" : "#666", fontSize: 10 } },
-    grid: { left: 10, right: 20, top: title ? 35 : 10, bottom: 35, containLabel: true },
+    grid: { left: 15, right: 25, top: title ? 30 : 8, bottom: 32, containLabel: true },
     xAxis: { type: "value" as const, axisLabel: { fontSize: 10, color: isDark ? "#999" : "#666" } },
     yAxis: { type: "value" as const, axisLabel: { fontSize: 10, color: isDark ? "#999" : "#666" } },
     series: Array.from(clusterMap.entries()).map(([_id, s], i) => ({
@@ -43,5 +43,5 @@ export default function ScatterChart({ title, data, clusters = [], height = 350 
     backgroundColor: "transparent",
   };
 
-  return <ReactECharts option={option} style={{ height }} />;
+  return <ReactECharts option={option} style={{ height: height > 0 ? height : "100%" }} />;
 }

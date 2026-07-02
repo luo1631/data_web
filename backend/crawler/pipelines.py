@@ -413,6 +413,7 @@ def _build_listing_values(
         "title": data.get("title"),
         "source_platform": "fang.com",
         "source_url": source_url,
+        "listing_type": data.get("listing_type", "regular"),
         "total_price": data.get("total_price"),
         "unit_price": data.get("unit_price"),
         "area": data.get("area"),

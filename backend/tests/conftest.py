@@ -15,6 +15,18 @@ from app.models import (
 )
 
 
+def pytest_configure(config):
+    """注册自定义 warning filter 和 markers。"""
+    config.addinivalue_line(
+        "filterwarnings",
+        "ignore:Please use `import python_multipart` instead:PendingDeprecationWarning",
+    )
+    config.addinivalue_line(
+        "markers",
+        "network: tests that require internet access to fang.com"
+    )
+
+
 @pytest.fixture(scope="function")
 async def db_session():
     """每个测试函数独立创建/销毁内存 SQLite 数据库。"""

@@ -12,56 +12,62 @@ URL:
 """
 
 # ============================================================
-# 区县配置（38 个）— fang_code 为房天下区县路径代码
+# 区县配置（37 个）— fang_code 为房天下当前区县路径代码
+#
+# 注：2026年7月房天下重构了区县分类，大量代码被重新分配。
+#     渝北区+江北区被合并为"两江新区"（a058），
+#     原代码 a056(江北区)→现渝中，a063/a064 互换等。
+#     本列表以 fang.com 当前实际页面为准。
 # ============================================================
 DISTRICTS: list[dict] = [
-    # --- 主城 9 区 ---
-    {"name": "渝北区",     "pinyin": "yubei",      "is_urban": True,  "fang_code": "a058"},
-    {"name": "江北区",     "pinyin": "jiangbei",    "is_urban": True,  "fang_code": "a056"},
-    {"name": "渝中区",     "pinyin": "yuzhong",     "is_urban": True,  "fang_code": None},    # 渝中区几乎无二手房，fang.com 筛选栏不展示
-    {"name": "南岸区",     "pinyin": "nanan",       "is_urban": True,  "fang_code": "a059"},
-    {"name": "九龙坡区",   "pinyin": "jiulongpo",   "is_urban": True,  "fang_code": "a061"},
-    {"name": "沙坪坝区",   "pinyin": "shapingba",   "is_urban": True,  "fang_code": "a060"},
-    {"name": "巴南区",     "pinyin": "banan",       "is_urban": True,  "fang_code": "a063"},
-    {"name": "大渡口区",   "pinyin": "dadukou",     "is_urban": True,  "fang_code": "a062"},
-    {"name": "北碚区",     "pinyin": "beibei",      "is_urban": True,  "fang_code": "a064"},
-    # --- 近郊 12 区 ---
-    {"name": "璧山区",     "pinyin": "bishan",      "is_urban": True,  "fang_code": "a016748"},
-    {"name": "江津区",     "pinyin": "jiangjin",    "is_urban": True,  "fang_code": None},    # fang.com 不展示此区
-    {"name": "永川区",     "pinyin": "yongchuan",   "is_urban": True,  "fang_code": "a011839"},
-    {"name": "合川区",     "pinyin": "hechuan",     "is_urban": True,  "fang_code": "a011828"},
-    {"name": "长寿区",     "pinyin": "changshou",   "is_urban": True,  "fang_code": None},    # fang.com 不展示此区
-    {"name": "涪陵区",     "pinyin": "fuling",      "is_urban": True,  "fang_code": "a011827"},
-    {"name": "南川区",     "pinyin": "nanchuan",    "is_urban": True,  "fang_code": "a011829"},
-    {"name": "綦江区",     "pinyin": "qijiang",     "is_urban": True,  "fang_code": "a011831"},
-    {"name": "大足区",     "pinyin": "dazu",        "is_urban": True,  "fang_code": "a017400"},
-    {"name": "铜梁区",     "pinyin": "tongliang",   "is_urban": True,  "fang_code": "a011833"},
-    {"name": "潼南区",     "pinyin": "tongnan",     "is_urban": True,  "fang_code": "a017401"},
-    {"name": "荣昌区",     "pinyin": "rongchang",   "is_urban": True,  "fang_code": "a011832"},
-    # --- 远郊 17 区县 ---
-    {"name": "万州区",     "pinyin": "wanzhou",     "is_urban": False, "fang_code": "a011834"},
-    {"name": "开州区",     "pinyin": "kaizhou",     "is_urban": False, "fang_code": None},    # fang.com 不展示此区
-    {"name": "梁平区",     "pinyin": "liangping",   "is_urban": False, "fang_code": "a016709"},
-    {"name": "武隆区",     "pinyin": "wulong",      "is_urban": False, "fang_code": "a011837"},
-    {"name": "城口县",     "pinyin": "chengkou",    "is_urban": False, "fang_code": "a016718"},
-    {"name": "丰都县",     "pinyin": "fengdu",      "is_urban": False, "fang_code": "a016707"},
-    {"name": "垫江县",     "pinyin": "dianjiang",   "is_urban": False, "fang_code": "a011825"},
-    {"name": "忠县",       "pinyin": "zhongxian",   "is_urban": False, "fang_code": "a016708"},
-    {"name": "云阳县",     "pinyin": "yunyang",     "is_urban": False, "fang_code": "a011840"},
-    {"name": "奉节县",     "pinyin": "fengjie",     "is_urban": False, "fang_code": "a011826"},
-    {"name": "巫山县",     "pinyin": "wushan",      "is_urban": False, "fang_code": "a011835"},
-    {"name": "巫溪县",     "pinyin": "wuxi",        "is_urban": False, "fang_code": "a016714"},
-    {"name": "黔江区",     "pinyin": "qianjiang",   "is_urban": False, "fang_code": "a016710"},
-    {"name": "石柱土家族自治县",     "pinyin": "shizhu",    "is_urban": False, "fang_code": "a016711"},
-    {"name": "秀山土家族苗族自治县", "pinyin": "xiushan",   "is_urban": False, "fang_code": "a011838"},
-    {"name": "酉阳土家族苗族自治县", "pinyin": "youyang",   "is_urban": False, "fang_code": "a016713"},
-    {"name": "彭水苗族土家族自治县", "pinyin": "pengshui",  "is_urban": False, "fang_code": "a011830"},
+    # --- 主城 8 区（fang.com 显示名）---
+    {"name": "两江新区",   "db_name": "两江新区", "pinyin": "liangjiang", "is_urban": True,  "fang_code": "a058"},
+    {"name": "渝中",       "db_name": "渝中区",   "pinyin": "yuzhong",    "is_urban": True,  "fang_code": "a056"},
+    {"name": "南岸",       "db_name": "南岸区",   "pinyin": "nanan",      "is_urban": True,  "fang_code": "a059"},
+    {"name": "沙坪坝",     "db_name": "沙坪坝区", "pinyin": "shapingba",  "is_urban": True,  "fang_code": "a060"},
+    {"name": "九龙坡",     "db_name": "九龙坡区", "pinyin": "jiulongpo",  "is_urban": True,  "fang_code": "a061"},
+    {"name": "巴南",       "db_name": "巴南区",   "pinyin": "banan",      "is_urban": True,  "fang_code": "a064"},
+    {"name": "大渡口",     "db_name": "大渡口区", "pinyin": "dadukou",    "is_urban": True,  "fang_code": "a062"},
+    {"name": "北碚",       "db_name": "北碚区",   "pinyin": "beibei",     "is_urban": True,  "fang_code": "a063"},
+    # --- 近郊 13 区 ---
+    {"name": "合川",       "db_name": "合川区",   "pinyin": "hechuan",    "is_urban": True,  "fang_code": "a011841"},
+    {"name": "涪陵",       "db_name": "涪陵区",   "pinyin": "fuling",     "is_urban": True,  "fang_code": "a011828"},
+    {"name": "江津",       "db_name": "江津区",   "pinyin": "jiangjin",   "is_urban": True,  "fang_code": "a011833"},
+    {"name": "璧山",       "db_name": "璧山区",   "pinyin": "bishan",     "is_urban": True,  "fang_code": "a011840"},
+    {"name": "永川",       "db_name": "永川区",   "pinyin": "yongchuan",  "is_urban": True,  "fang_code": "a011839"},
+    {"name": "綦江",       "db_name": "綦江区",   "pinyin": "qijiang",    "is_urban": True,  "fang_code": "a011831"},
+    {"name": "长寿",       "db_name": "长寿区",   "pinyin": "changshou",  "is_urban": True,  "fang_code": "a011825"},
+    {"name": "大足",       "db_name": "大足区",   "pinyin": "dazu",       "is_urban": True,  "fang_code": "a011826"},
+    {"name": "垫江",       "db_name": "垫江县",   "pinyin": "dianjiang",  "is_urban": True,  "fang_code": "a011827"},
+    {"name": "南川",       "db_name": "南川区",   "pinyin": "nanchuan",   "is_urban": True,  "fang_code": "a011829"},
+    {"name": "荣昌",       "db_name": "荣昌区",   "pinyin": "rongchang",  "is_urban": True,  "fang_code": "a011832"},
+    {"name": "铜梁",       "db_name": "铜梁区",   "pinyin": "tongliang",  "is_urban": True,  "fang_code": "a011834"},
+    {"name": "潼南",       "db_name": "潼南区",   "pinyin": "tongnan",    "is_urban": True,  "fang_code": "a011835"},
+    # --- 远郊 16 区县 ---
+    {"name": "万州",       "db_name": "万州区",   "pinyin": "wanzhou",    "is_urban": False, "fang_code": "a011837"},
+    {"name": "武隆",       "db_name": "武隆区",   "pinyin": "wulong",     "is_urban": False, "fang_code": "a011838"},
+    {"name": "丰都",       "db_name": "丰都县",   "pinyin": "fengdu",     "is_urban": False, "fang_code": "a016707"},
+    {"name": "奉节",       "db_name": "奉节县",   "pinyin": "fengjie",    "is_urban": False, "fang_code": "a016708"},
+    {"name": "梁平",       "db_name": "梁平区",   "pinyin": "liangping",  "is_urban": False, "fang_code": "a016709"},
+    {"name": "黔江",       "db_name": "黔江区",   "pinyin": "qianjiang",  "is_urban": False, "fang_code": "a016710"},
+    {"name": "石柱",       "db_name": "石柱土家族自治县",     "pinyin": "shizhu",   "is_urban": False, "fang_code": "a016711"},
+    {"name": "巫山",       "db_name": "巫山县",   "pinyin": "wushan",     "is_urban": False, "fang_code": "a016712"},
+    {"name": "云阳",       "db_name": "云阳县",   "pinyin": "yunyang",    "is_urban": False, "fang_code": "a016713"},
+    {"name": "忠县",       "db_name": "忠县",     "pinyin": "zhongxian",  "is_urban": False, "fang_code": "a016714"},
+    {"name": "城口",       "db_name": "城口县",   "pinyin": "chengkou",   "is_urban": False, "fang_code": "a016718"},
+    {"name": "巫溪",       "db_name": "巫溪县",   "pinyin": "wuxi",       "is_urban": False, "fang_code": "a016719"},
+    {"name": "开州",       "db_name": "开州区",   "pinyin": "kaizhou",    "is_urban": False, "fang_code": "a016748"},
+    {"name": "秀山",       "db_name": "秀山土家族苗族自治县", "pinyin": "xiushan",  "is_urban": False, "fang_code": "a017400"},
+    {"name": "酉阳",       "db_name": "酉阳土家族苗族自治县", "pinyin": "youyang",  "is_urban": False, "fang_code": "a017401"},
+    {"name": "彭水",       "db_name": "彭水苗族土家族自治县", "pinyin": "pengshui", "is_urban": False, "fang_code": "a011830"},
 ]
 
-# 仅含有效 fang_code 的区县（爬虫可爬的）
+# 仅含有效 fang_code 的区县（爬虫可爬的）— 现在全部 37 个都有
 ACTIVE_DISTRICTS = [d for d in DISTRICTS if d["fang_code"] is not None]
 
+# fang.com 显示名 → 字典；DB 正式名 → 字典
 DISTRICT_BY_NAME: dict[str, dict] = {d["name"]: d for d in DISTRICTS}
+DISTRICT_BY_DB_NAME: dict[str, dict] = {d["db_name"]: d for d in DISTRICTS}
 DISTRICT_BY_SLUG: dict[str, dict] = {d["pinyin"]: d for d in DISTRICTS}
 
 # ============================================================
@@ -90,9 +96,6 @@ DRY_PAGE_THRESHOLD = 3            # 连续 N 页无变化即停止该区县
 FETCH_FAILURE_THRESHOLD = 3       # 连续 N 页网络错误即停止该区县
 
 # 历史兼容
-OVERLAP_THRESHOLD = 0.9
-LIST_CONCURRENCY = 1
-DETAIL_CONCURRENCY = 3
 
 # ============================================================
 # User-Agent 池
@@ -139,10 +142,5 @@ FLOOR_LEVEL_MAP: dict[str, str] = {
     "高": "高楼层", "高楼层": "高楼层", "高层": "高楼层", "顶层": "高楼层",
 }
 
-# 社区名括号内简称 → 区县全名（用于文本推断归属）
-_AREA_SHORT_TO_FULL: dict[str, str] = {
-    "两江新区": "渝北区",
-    "高新区": "九龙坡区",
-    "北部新区": "渝北区",
-    "经开区": "南岸区",
-}
+# 注：区县简称 → 全名 的映射在 crawler/district_resolver.py 的 _EXTRA_ALIASES 中维护，
+# 此处原先的 _AREA_SHORT_TO_FULL 已被该字典取代，不再维护。

@@ -11,8 +11,7 @@ export interface DistrictInfo {
 }
 
 export const DISTRICTS: DistrictInfo[] = [
-  { id: 1, name: "渝北区", isUrban: true },
-  { id: 2, name: "江北区", isUrban: true },
+  { id: 1, name: "两江新区", isUrban: true },
   { id: 3, name: "渝中区", isUrban: true },
   { id: 4, name: "南岸区", isUrban: true },
   { id: 5, name: "九龙坡区", isUrban: true },

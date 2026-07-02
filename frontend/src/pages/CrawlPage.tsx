@@ -71,7 +71,7 @@ export default function CrawlPage() {
             className="w-24"
             type="number"
             min={5}
-            max={100}
+            max={200}
             step={5}
             value={maxPages}
             onChange={(e) => setMaxPages(Number(e.target.value))}
@@ -106,7 +106,7 @@ export default function CrawlPage() {
 
       {/* 任务列表 */}
       <section
-        className="flex-1 min-h-0 overflow-hidden rounded-[var(--radius-lg)] bg-[var(--color-surface)] text-[var(--color-text-primary)] p-6 border border-[var(--color-border-light)] flex flex-col"
+        className="flex-1 min-h-0 rounded-[var(--radius-lg)] bg-[var(--color-surface)] text-[var(--color-text-primary)] p-6 border border-[var(--color-border-light)] flex flex-col"
         style={{ boxShadow: "var(--elevation-1)" }}
       >
         <h2 className="text-base font-semibold mb-3 shrink-0">
@@ -149,18 +149,13 @@ export default function CrawlPage() {
                 )}
                 {/* 历史批次（每批一行，区县汇总） */}
                 {historyOnly.map((b) => {
-                  const tasks = b.tasks ?? [];
-                  const completedTasks = tasks.filter((t) => t.status === "completed");
-                  const totalPages = completedTasks.reduce((s, t) => s + (t.page_end ?? 1) - (t.page_start ?? 1) + 1, 0);
-                  const distNames = tasks
-                    .map((t) => t.district_name)
-                    .filter(Boolean) as string[];
+                  const distNames = b.district_names ?? [];
                   const distSummary = distNames.length > 0
                     ? (distNames.length <= 3
                       ? distNames.join("，")
                       : `${distNames.slice(0, 3).join("，")} ${lang === "zh" ? "等" : "&"} ${distNames.length} ${lang === "zh" ? "个区县" : "districts"}`)
-                    : tasks.length > 0
-                      ? `${tasks.length} ${lang === "zh" ? "个区县" : "districts"}`
+                    : b.total_tasks > 0
+                      ? `${b.total_tasks} ${lang === "zh" ? "个区县" : "districts"}`
                       : "-";
                   return (
                     <tr key={b.id} className="border-t border-[var(--color-border-light)] hover:bg-[var(--color-accent-bg)]/50 transition-colors">
@@ -174,7 +169,7 @@ export default function CrawlPage() {
                       </td>
                       <td className="py-1.5 px-2 text-[var(--color-text-primary)]">{distSummary}</td>
                       <td className="text-right py-1.5 px-2 tabular-nums">{b.new_listings}</td>
-                      <td className="text-right py-1.5 px-2 text-[var(--color-text-secondary)] tabular-nums">{totalPages || "-"}</td>
+                      <td className="text-right py-1.5 px-2 text-[var(--color-text-secondary)] tabular-nums">{b.total_pages || "-"}</td>
                       <td className="text-right py-1.5 px-2 text-[var(--color-text-secondary)]">
                         {b.finished_at ? new Date(b.finished_at).toLocaleString() : "-"}
                       </td>

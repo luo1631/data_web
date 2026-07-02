@@ -19,7 +19,7 @@ export default function LineChart({ title, xData, series, height = 300, smooth =
     title: title ? { text: title, left: "center", textStyle: { fontSize: 13, color: isDark ? "#e0e0e0" : "#333" } } : undefined,
     tooltip: { trigger: "axis" as const },
     legend: series.length > 1 ? { bottom: 0, textStyle: { color: isDark ? "#aaa" : "#666", fontSize: 11 } } : undefined,
-    grid: { left: 10, right: 20, top: title ? 35 : 10, bottom: series.length > 1 ? 30 : 5, containLabel: true },
+    grid: { left: 15, right: 25, top: title ? 30 : 8, bottom: series.length > 1 ? 28 : 5, containLabel: true },
     xAxis: {
       type: "category" as const,
       data: xData,

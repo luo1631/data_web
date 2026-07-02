@@ -20,7 +20,7 @@ function loadNum(key: string, fallback: number): number {
   return fallback;
 }
 
-const initialMaxPages = loadNum("settings_defaultMaxPages", 30);
+const initialMaxPages = loadNum("settings_defaultMaxPages", 100);
 const initialPageSize = loadNum("settings_defaultPageSize", 30);
 
 export const useSettingsStore = create<SettingsState>((set) => ({

@@ -15,6 +15,10 @@ import type { Listing } from "../types/common";
 const DECORATION_VALUES = ["毛坯", "简装", "精装", "豪装"] as const;
 const ORIENTATION_VALUES = ["南", "北", "南北", "东南", "西南"] as const;
 const ROOM_OPTIONS = [1, 2, 3, 4, 5, 6];
+const LISTING_TYPE_OPTS: Record<string, Record<string, string>> = {
+  zh: { "": "全部类型", regular: "二手房", court_auction: "法拍房" },
+  en: { "": "All Types", regular: "Resale", court_auction: "Auction" },
+};
 
 export default function DataStoragePage() {
   const lang = useThemeStore((s) => s.lang);
@@ -54,6 +58,7 @@ export default function DataStoragePage() {
     setSortDir("desc");
     updateFilters({
       district_id: undefined,
+      listing_type: undefined,
       min_price: undefined, max_price: undefined,
       min_unit_price: undefined, max_unit_price: undefined,
       min_area: undefined, max_area: undefined,
@@ -84,9 +89,14 @@ export default function DataStoragePage() {
       ),
     },
     {
-      key: "title", header: t("storage.columns.title", lang), width: "200px",
+      key: "title", header: t("storage.columns.title", lang), width: "180px",
       render: (r) => (
-        <span className="truncate max-w-[200px] block" title={r.title ?? ""}>
+        <span className="truncate max-w-[180px] block" title={r.title ?? ""}>
+          {r.listing_type === "court_auction" && (
+            <span className="inline-block mr-1 px-1 rounded text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
+              {lang === "zh" ? "法拍" : "Auct"}
+            </span>
+          )}
           {r.title || "-"}
         </span>
       ),
@@ -156,6 +166,16 @@ export default function DataStoragePage() {
             value={filters.room_count != null ? String(filters.room_count) : ""}
             onChange={(e) => updateFilter("room_count", e.target.value ? Number(e.target.value) : undefined)}
             options={roomOpts}
+          />
+          <Select
+            label={lang === "zh" ? "类型" : "Type"}
+            value={filters.listing_type ?? ""}
+            onChange={(e) => updateFilter("listing_type", e.target.value || undefined)}
+            options={[
+              { value: "", label: LISTING_TYPE_OPTS[lang][""] },
+              { value: "regular", label: LISTING_TYPE_OPTS[lang].regular },
+              { value: "court_auction", label: LISTING_TYPE_OPTS[lang].court_auction },
+            ]}
           />
           <Input
             label={t("storage.minUnitPrice", lang)} placeholder="0" className="w-28"
