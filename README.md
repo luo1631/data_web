@@ -98,11 +98,11 @@ playwright install chromium
 # 初始化数据库 + 区县种子数据
 python seed_data.py
 
-# 启动服务 (http://localhost:8000)
+# 启动服务 (http://localhost:8001)
 uvicorn app.main:app --reload
 ```
 
-API 文档: `http://localhost:8000/docs`
+API 文档: `http://localhost:8001/docs`
 
 #### 2. 前端
 
@@ -112,7 +112,7 @@ npm install
 npm run dev    # http://localhost:5173
 ```
 
-Vite 开发服务器自动代理 `/api` → `http://127.0.0.1:8000`。
+Vite 开发服务器自动代理 `/api` → `http://127.0.0.1:8001`。
 
 #### 3. 爬虫 CLI
 
