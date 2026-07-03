@@ -5,8 +5,11 @@
   - 聚类仅基于物理属性（面积、户型、楼层、装修等），不包含价格
   - 价格作为输出统计量，用于描述每个聚类的市场定位
   - 使用肘部法则确定最佳 K 值，避免硬编码
+
+性能: 模块级缓存（10 分钟 TTL），同参数请求直接命中。
 """
 
+import time
 import pandas as pd
 import numpy as np
 from sklearn.cluster import KMeans
@@ -19,6 +22,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.listing import Listing
 
+# ── 模块级缓存 ──
+_CACHE: dict = {}
+_CACHE_TTL = 600  # 10 分钟
+
 # K 值搜索范围（最少 5 个以提供足够细分的房源画像）
 K_MIN, K_MAX = 5, 8
 
@@ -28,6 +35,7 @@ async def get_clusters(db: AsyncSession, district_id: int | None = None, include
 
     使用肘部法则从 [K_MIN, K_MAX] 范围内选择最佳 K 值。
     聚类特征仅包含物理属性，price 仅作为输出统计标签。
+    结果缓存 10 分钟。
 
     Returns:
         {clusters: [{id, label, size, avg_unit_price, avg_area, avg_age}],
@@ -36,6 +44,11 @@ async def get_clusters(db: AsyncSession, district_id: int | None = None, include
          sample_size: int,
          k_selected: int}
     """
+    cache_key = f"{district_id}_{include_court_auction}"
+    now = time.time()
+    cached = _CACHE.get(cache_key)
+    if cached and now - cached["ts"] < _CACHE_TTL:
+        return cached["data"]
     stmt = select(
         Listing.unit_price, Listing.area, Listing.room_count,
         Listing.decoration, Listing.total_floors,
@@ -148,13 +161,15 @@ async def get_clusters(db: AsyncSession, district_id: int | None = None, include
         for (x, y), l in zip(xy, labels)
     ]
 
-    return {
+    data = {
         "clusters": clusters,
         "scatter": scatter,
         "pca_variance": round(float(pca.explained_variance_ratio_.sum()), 4),
         "sample_size": len(df),
         "k_selected": N,
     }
+    _CACHE[cache_key] = {"ts": now, "data": data}
+    return data
 
 
 def _elbow_candidates(inertias: list[tuple[int, float]], k_min: int, k_max: int) -> list[int]:

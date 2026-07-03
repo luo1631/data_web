@@ -12,8 +12,18 @@
 import argparse
 import asyncio
 import json
+import logging
 import sys
 from pathlib import Path
+
+# 确保所有 logger 输出到 stdout，实时可见
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+    stream=sys.stdout,
+    force=True,
+)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
@@ -32,12 +42,54 @@ async def cmd_crawl(args):
 
     engine = CrawlEngine(_get_session_factory())
     batch_type = "incremental" if args.incremental else "full"
-    print(f"Starting {batch_type} crawl, max_pages={args.max_pages}")
+    district_filter = None
+    if args.districts:
+        district_filter = [d.strip() for d in args.districts.split(",") if d.strip()]
+    print(
+        f"Starting {batch_type} crawl, max_pages={args.max_pages}"
+        + (f", districts={district_filter}" if district_filter else "")
+        + (", no-early-stop" if args.no_early_stop else "")
+    )
 
     try:
         result = await engine.crawl_all(
             batch_type=batch_type,
             max_pages=args.max_pages,
+            district_filter=district_filter,
+            no_early_stop=args.no_early_stop,
+        )
+        print("\n── Done ──")
+        for k, v in result.items():
+            print(f"  {k}: {v}")
+    except KeyboardInterrupt:
+        print("\n[STOP] Interrupted, progress saved.")
+        engine.stop()
+    except Exception as e:
+        print(f"\n[FATAL] {e}")
+        engine.stop()
+
+
+# ── anjuke crawl ────────────────────────────────────
+
+async def cmd_anjuke(args):
+    from crawler.anjuke_engine import AnjukeCrawlEngine
+
+    engine = AnjukeCrawlEngine(_get_session_factory())
+    area_filter = None
+    if args.areas:
+        area_filter = [a.strip() for a in args.areas.split(",") if a.strip()]
+    print(
+        f"Starting anjuke crawl, max_pages={args.max_pages}"
+        + (f", areas={area_filter}" if area_filter else "")
+        + (", no-early-stop" if args.no_early_stop else "")
+    )
+
+    try:
+        result = await engine.crawl_all(
+            batch_type="full",
+            max_pages=args.max_pages,
+            area_filter=area_filter,
+            no_early_stop=args.no_early_stop,
         )
         print("\n── Done ──")
         for k, v in result.items():
@@ -118,7 +170,15 @@ def main():
     p = sub.add_parser("crawl", help="运行爬虫")
     p.add_argument("--max-pages", type=int, default=30, help="最大翻页数")
     p.add_argument("--incremental", action="store_true")
+    p.add_argument("--districts", type=str, default=None, help="限定区县名，逗号分隔 (如: 渝中,两江新区)")
+    p.add_argument("--no-early-stop", action="store_true", help="禁用零产出跳页和提前终止（首次全量爬取用）")
     p.set_defaults(func=cmd_crawl)
+
+    p = sub.add_parser("anjuke", help="运行安居客爬虫")
+    p.add_argument("--max-pages", type=int, default=100, help="最大翻页数")
+    p.add_argument("--areas", type=str, default=None, help="限定子区域，逗号分隔 (如: yuzhong-daping,nanana-nanping)")
+    p.add_argument("--no-early-stop", action="store_true", help="禁用零产出跳页和提前终止")
+    p.set_defaults(func=cmd_anjuke)
 
     p = sub.add_parser("status", help="查看爬取进度")
     p.set_defaults(func=cmd_status)

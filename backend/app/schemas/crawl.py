@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 class CrawlStartRequest(BaseModel):
     """启动爬取请求"""
     max_pages_per_district: int = Field(100, ge=1, le=200, description="每区县最大翻页数")
+    no_early_stop: bool = Field(False, description="禁用零产出跳页和提前终止")
 
 
 # ── 响应体 ──

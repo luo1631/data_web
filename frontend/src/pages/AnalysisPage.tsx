@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import Spinner from "../components/ui/Spinner";
 import BarChart from "../components/charts/BarChart";
@@ -34,6 +34,7 @@ export default function AnalysisPage() {
   const [mapData, setMapData] = useState<MapPriceItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [includeAuction, setIncludeAuction] = useState(false);  // 默认不含法拍房
+  const mounted = useRef(false);
 
   const load = useCallback(async (tab: Tab, includeAuc: boolean) => {
     setLoading(true);
@@ -56,8 +57,11 @@ export default function AnalysisPage() {
     }
   }, []);
 
+  // tab / includeAuction 变化时加载
   useEffect(() => { load(tab, includeAuction); }, [tab, includeAuction, load]);
+  // 从其他路由跳回时刷新（首次挂载跳过，避免与上面重复）
   useEffect(() => {
+    if (!mounted.current) { mounted.current = true; return; }
     if (location.pathname === "/analysis") load(tab, includeAuction);
   }, [location.pathname]); // eslint-disable-line
 

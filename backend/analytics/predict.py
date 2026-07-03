@@ -3,8 +3,12 @@
 
 原理：在所有在售房源中找到与用户条件最相似的 K 套，
       按距离倒数加权平均计算预测价格。
+
+性能: 模块级缓存（10 分钟 TTL），缓存 fitted ColumnTransformer + NearestNeighbors，
+      避免每次请求重新加载全量数据 + 重复训练。
 """
 
+import time
 import pandas as pd
 import numpy as np
 
@@ -18,6 +22,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.listing import Listing
 from app.models.district import District
 from app.models.community import Community
+
+# ── 模块级模型缓存 ──
+_MODEL_CACHE: dict = {}       # key → {ts, preprocessor, knn, df, ...}
+_MODEL_CACHE_TTL = 600        # 10 分钟
 
 NUM_FEATURES = ["area", "room_count", "hall_count"]
 CAT_FEATURES = ["floor_level", "orientation", "decoration", "district_id"]
@@ -36,73 +44,92 @@ async def predict_price(
     decoration: str,
     building_type: str | None = None,
 ) -> dict:
-    # ── 1. 加载数据 ──
-    cols = [
-        Listing.unit_price, Listing.total_price, Listing.area,
-        Listing.room_count, Listing.hall_count,
-        Listing.floor_level, Listing.orientation, Listing.decoration,
-        Listing.district_id,
-        Listing.title, Listing.community_id, Listing.source_url, Listing.id,
-    ]
-    stmt = select(*cols).where(
-        Listing.status == "active",
-        Listing.unit_price.isnot(None),
-        Listing.area.isnot(None),
-        Listing.area.between(20, 500),
-        Listing.unit_price.between(500, 80000),
-    )
-    if district_id:
-        sub = stmt.where(Listing.district_id == district_id)
-        cnt = await db.scalar(select(func.count()).select_from(sub.subquery()))
-        if cnt >= 100:
-            stmt = sub
+    # ── 缓存命中：复用已训练的 preprocessor + KNN + DataFrame ──
+    cache_key = str(district_id)
+    now = time.time()
+    cached = _MODEL_CACHE.get(cache_key)
+    if cached and now - cached["ts"] < _MODEL_CACHE_TTL and cached["df"] is not None:
+        preprocessor = cached["preprocessor"]
+        knn = cached["knn"]
+        df = cached["df"]
+        _rooms = cached["_rooms"]
+        _halls = cached["_halls"]
+    else:
+        # ── 1. 加载数据 ──
+        cols = [
+            Listing.unit_price, Listing.total_price, Listing.area,
+            Listing.room_count, Listing.hall_count,
+            Listing.floor_level, Listing.orientation, Listing.decoration,
+            Listing.district_id,
+            Listing.title, Listing.community_id, Listing.source_url, Listing.id,
+        ]
+        stmt = select(*cols).where(
+            Listing.status == "active",
+            Listing.unit_price.isnot(None),
+            Listing.area.isnot(None),
+            Listing.area.between(20, 500),
+            Listing.unit_price.between(500, 80000),
+        )
+        if district_id:
+            sub = stmt.where(Listing.district_id == district_id)
+            cnt = await db.scalar(select(func.count()).select_from(sub.subquery()))
+            if cnt >= 100:
+                stmt = sub
 
-    result = await db.execute(stmt)
-    rows = result.all()
-    if len(rows) < 30:
-        return {
-            "predicted_unit_price": None, "predicted_total_price": None,
-            "confidence": "low", "sample_size": len(rows),
-            "r2_score": None, "similar_listings": [],
+        result = await db.execute(stmt)
+        rows = result.all()
+        if len(rows) < 30:
+            _MODEL_CACHE[cache_key] = {"ts": now, "preprocessor": None, "knn": None, "df": None, "_rooms": [], "_halls": []}
+            return {
+                "predicted_unit_price": None, "predicted_total_price": None,
+                "confidence": "low", "sample_size": len(rows),
+                "r2_score": None, "similar_listings": [],
+            }
+
+        col_names = [
+            "unit_price", "total_price", "area",
+            "room_count", "hall_count",
+            "floor_level", "orientation", "decoration", "district_id",
+            "title", "community_id", "source_url", "id",
+        ]
+        df = pd.DataFrame(rows, columns=col_names)
+
+        # 数值列 — Decimal → float → 填充 NaN
+        for c in ["unit_price", "total_price", "area", "room_count", "hall_count"]:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+        df["area"] = df["area"].fillna(df["area"].median())
+        df["room_count"] = df["room_count"].fillna(3)
+        df["hall_count"] = df["hall_count"].fillna(2)
+        df["unit_price"] = df["unit_price"].fillna(df["unit_price"].median())
+        df["total_price"] = df["total_price"].fillna(df["total_price"].median())
+        df = df.dropna(subset=NUM_FEATURES + ["unit_price"])
+
+        _rooms = df["room_count"].astype(int).tolist()
+        _halls = df["hall_count"].astype(int).tolist()
+
+        # 类别列
+        for c in CAT_FEATURES:
+            if c in df.columns:
+                df[c] = df[c].fillna("未知").astype(str)
+
+        # ── 2. 特征预处理 + KNN（只训练一次，缓存复用）──
+        preprocessor = ColumnTransformer([
+            ("num", StandardScaler(), NUM_FEATURES),
+            ("cat", OneHotEncoder(handle_unknown="ignore", max_categories=20), CAT_FEATURES),
+        ])
+        X = df[NUM_FEATURES + CAT_FEATURES]
+        X_prep = preprocessor.fit_transform(X)
+
+        knn = NearestNeighbors(n_neighbors=min(K_NEIGHBORS, len(df)), metric="euclidean")
+        knn.fit(X_prep)
+
+        _MODEL_CACHE[cache_key] = {
+            "ts": now, "preprocessor": preprocessor, "knn": knn,
+            "df": df, "_rooms": _rooms, "_halls": _halls,
         }
 
-    col_names = [
-        "unit_price", "total_price", "area",
-        "room_count", "hall_count",
-        "floor_level", "orientation", "decoration", "district_id",
-        "title", "community_id", "source_url", "id",
-    ]
-    df = pd.DataFrame(rows, columns=col_names)
-
-    # 数值列 — Decimal → float → 填充 NaN
-    for c in ["unit_price", "total_price", "area", "room_count", "hall_count"]:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-    # 每列先各自填默认值，再统一 drop 残存 NaN 行
-    df["area"] = df["area"].fillna(df["area"].median())
-    df["room_count"] = df["room_count"].fillna(3)
-    df["hall_count"] = df["hall_count"].fillna(2)
-    df["unit_price"] = df["unit_price"].fillna(df["unit_price"].median())
-    df["total_price"] = df["total_price"].fillna(df["total_price"].median())
-    df = df.dropna(subset=NUM_FEATURES + ["unit_price"])
-
-    _rooms = df["room_count"].astype(int).tolist()
-    _halls = df["hall_count"].astype(int).tolist()
-
-    # 类别列
-    for c in CAT_FEATURES:
-        if c in df.columns:
-            df[c] = df[c].fillna("未知").astype(str)
-
-    # ── 2. 特征预处理 ──
-    preprocessor = ColumnTransformer([
-        ("num", StandardScaler(), NUM_FEATURES),
-        ("cat", OneHotEncoder(handle_unknown="ignore", max_categories=20), CAT_FEATURES),
-    ])
-    X = df[NUM_FEATURES + CAT_FEATURES]
-    X_prep = preprocessor.fit_transform(X)
-
-    # ── 3. 用户输入 ──
+    # ── 3. 用户输入（每次请求重新计算）──
     user_row = {
         "area": area,
         "room_count": float(room_count),
@@ -116,11 +143,9 @@ async def predict_price(
     user_prep = preprocessor.transform(user_df)
 
     # ── 4. KNN 搜索 ──
-    knn = NearestNeighbors(n_neighbors=min(K_NEIGHBORS, len(df)), metric="euclidean")
-    knn.fit(X_prep)
     distances, indices = knn.kneighbors(user_prep)
 
-    # ── 5. 加权平均 —— 距离越近权重越大 ──
+    # ── 5. 加权平均 ──
     prices = df["unit_price"].values[indices[0]].astype(float)
     dists = distances[0] + 0.01
     weights = 1.0 / dists

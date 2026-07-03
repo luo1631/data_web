@@ -28,9 +28,9 @@ echo [3/3] Starting...
 start "Backend"  "%~dp0_run_backend.bat"
 start "Frontend" "%~dp0_run_frontend.bat"
 
-echo     Backend  : http://localhost:8000
+echo     Backend  : http://localhost:8001
 echo     Frontend : http://localhost:5173
-echo     Swagger  : http://localhost:8000/docs
+echo     Swagger  : http://localhost:8001/docs
 echo.
 echo Close the two opened windows to stop.
 pause

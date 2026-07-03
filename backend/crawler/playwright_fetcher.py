@@ -66,8 +66,9 @@ _VIEWPORT_POOL = [
 class PlaywrightFetcher:
     """基于本机 Edge 的页面抓取器，支持上下文轮换。"""
 
-    def __init__(self, headless: bool = True):
+    def __init__(self, headless: bool = True, lite_mode: bool = False):
         self._headless = headless
+        self._lite_mode = lite_mode  # 轻量模式：最低限度反检测，用于安居客等
         self._playwright = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
@@ -85,6 +86,7 @@ class PlaywrightFetcher:
                 "--no-sandbox",
                 "--disable-gpu",
                 "--disable-dev-shm-usage",
+                "--no-proxy-server",          # 绕过系统代理，直连 fang.com
             ],
         )
         await self._create_context()
@@ -135,7 +137,7 @@ class PlaywrightFetcher:
         await self._seed()
 
         logger.info(
-            f"🔄 上下文轮换完成 (#{self._context_rotation_count})"
+            f"[Rotate] context rotation complete (#{self._context_rotation_count})"
         )
 
     async def _create_context(self) -> None:
@@ -155,35 +157,40 @@ class PlaywrightFetcher:
             permissions=["geolocation"],
         )
 
-        # 反检测脚本
-        await self._context.add_init_script("""
-            // 隐藏 webdriver 标记
-            Object.defineProperty(navigator, 'webdriver', { get: () => false });
-            // 模拟 Chrome 对象
-            window.chrome = {
-                runtime: {},
-                loadTimes: function() {},
-                csi: function() {},
-                app: {}
-            };
-            // 覆盖 permissions.query
-            const origQuery = window.navigator.permissions.query;
-            window.navigator.permissions.query = (parameters) => (
-                parameters.name === 'notifications' ?
-                Promise.resolve({
-                    state: Notification.permission,
-                    onchange: null
-                }) : origQuery(parameters)
-            );
-            // 覆盖 plugins 数组（真实浏览器有插件）
-            Object.defineProperty(navigator, 'plugins', {
-                get: () => [1, 2, 3, 4, 5]
-            });
-            // 覆盖 languages
-            Object.defineProperty(navigator, 'languages', {
-                get: () => ['zh-CN', 'zh', 'en']
-            });
-        """)
+        # 反检测脚本 — lite_mode 只用最低限度脚本
+        if self._lite_mode:
+            await self._context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => false });
+            """)
+        else:
+            await self._context.add_init_script("""
+                // 隐藏 webdriver 标记
+                Object.defineProperty(navigator, 'webdriver', { get: () => false });
+                // 模拟 Chrome 对象
+                window.chrome = {
+                    runtime: {},
+                    loadTimes: function() {},
+                    csi: function() {},
+                    app: {}
+                };
+                // 覆盖 permissions.query
+                const origQuery = window.navigator.permissions.query;
+                window.navigator.permissions.query = (parameters) => (
+                    parameters.name === 'notifications' ?
+                    Promise.resolve({
+                        state: Notification.permission,
+                        onchange: null
+                    }) : origQuery(parameters)
+                );
+                // 覆盖 plugins 数组（真实浏览器有插件）
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [1, 2, 3, 4, 5]
+                });
+                // 覆盖 languages
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['zh-CN', 'zh', 'en']
+                });
+            """)
 
         self._page = await self._context.new_page()
         self._page.set_default_timeout(PAGE_LOAD_TIMEOUT)
@@ -198,7 +205,7 @@ class PlaywrightFetcher:
     async def fetch_page(
         self, page: int = 1, fang_code: str | None = None
     ) -> tuple[str, str]:
-        """抓取列表页。
+        """抓取 fang.com 列表页。
 
         Args:
             page: 页码（从 1 开始）
@@ -217,7 +224,6 @@ class PlaywrightFetcher:
         await self._rate_limit(page=page)
         html = await self._navigate(url)
 
-        # 检测验证码页
         if self.is_captcha_page(html):
             logger.warning(
                 f"验证码页: page {page} ({fang_code}), "
@@ -226,6 +232,57 @@ class PlaywrightFetcher:
             await asyncio.sleep(CAPTCHA_EXTRA_DELAY)
 
         return html, url
+
+    async def fetch_url(
+        self, url: str, page: int = 1, delay_range: tuple[float, float] = (3.0, 6.0)
+    ) -> tuple[str, str]:
+        """抓取任意 URL（用于安居客等非 fang.com 站点）。
+
+        Args:
+            url: 完整 URL
+            page: 页码（用于限速计算）
+            delay_range: (min, max) 延迟范围（秒）
+        """
+        await self._rate_limit_anjuke(page=page, delay_range=delay_range)
+        html = await self._navigate_generic(url)
+        return html, url
+
+    async def _navigate_generic(self, url: str) -> str:
+        """通用导航 — 不等 fang.com 选择器，直接获取内容后返回。
+
+        用于安居客等非 fang.com 站点，避免 wait_for_selector 超时
+        期间触发目标站点的 bot 检测。
+        """
+        last_error = ""
+        for attempt in range(1, NAVIGATE_RETRIES + 1):
+            try:
+                await self._page.goto(
+                    url,
+                    wait_until="domcontentloaded",
+                    timeout=PAGE_LOAD_TIMEOUT,
+                )
+                # 等待页面渲染（不等特定选择器）
+                await asyncio.sleep(1.5)
+
+                content = await self._page.content()
+                if content and len(content) > 500:
+                    return content
+                last_error = f"内容过短 ({len(content)} bytes)"
+
+            except PlaywrightTimeout as e:
+                last_error = str(e)
+            except Exception as e:
+                last_error = str(e)
+
+            if attempt < NAVIGATE_RETRIES:
+                wait = 5 + attempt * 3
+                await asyncio.sleep(wait)
+
+        logger.error(f"导航失败 after {NAVIGATE_RETRIES} attempts: {url}")
+        try:
+            return await self._page.content()
+        except Exception:
+            return ""
 
     async def _navigate(self, url: str) -> str:
         """导航到 URL 并返回页面内容，最多重试 NAVIGATE_RETRIES 次。"""
@@ -324,6 +381,31 @@ class PlaywrightFetcher:
 
         target = base + progressive + captcha_penalty + jitter
         target = max(0.8, target)  # 最小 0.8s
+
+        if elapsed < target:
+            await asyncio.sleep(target - elapsed)
+        self._last_request_time = asyncio.get_running_loop().time()
+
+    async def _rate_limit_anjuke(
+        self, page: int = 1, delay_range: tuple[float, float] = (3.0, 6.0)
+    ) -> None:
+        """安居客专用限速 — 比 fang.com 更保守，避免 IP 限速。
+
+        Args:
+            page: 当前页码
+            delay_range: (min_seconds, max_seconds)
+        """
+        now = asyncio.get_running_loop().time()
+        elapsed = now - self._last_request_time
+
+        base = random.uniform(*delay_range)
+        # 翻页渐进: 每 10 页 +1s
+        progressive = (page // 10) * 1.0
+        # 随机抖动 ±30%
+        jitter = random.uniform(-0.3, 0.3) * base
+
+        target = base + progressive + jitter
+        target = max(delay_range[0], target)
 
         if elapsed < target:
             await asyncio.sleep(target - elapsed)

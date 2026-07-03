@@ -74,6 +74,7 @@ class CrawlEngine:
         max_pages: int = 30,
         pre_created_batch_id: int | None = None,
         district_filter: list[str] | None = None,
+        no_early_stop: bool = False,
     ) -> dict:
         """按区县逐页爬取 — 自适应优先级调度。
 
@@ -82,6 +83,7 @@ class CrawlEngine:
             max_pages: 每个区县的最大翻页数
             pre_created_batch_id: 复用已创建的批次 ID
             district_filter: 限定区县名列表，None 为全部有效区县
+            no_early_stop: 禁用零产出跳页和提前停止 (用于首次全量爬取)
         """
         self._status = "running"
         self._new_count = self._updated_count = self._unchanged_count = 0
@@ -165,7 +167,7 @@ class CrawlEngine:
                         if self._total_pages_fetched > 0 and \
                            self._total_pages_fetched % CONTEXT_ROTATE_PAGES == 0:
                             logger.info(
-                                f"🔄 Rotating browser context "
+                                f"[Rotate] Rotating browser context "
                                 f"(total pages: {self._total_pages_fetched})"
                             )
                             await pf.rotate_context()
@@ -220,13 +222,14 @@ class CrawlEngine:
                                         f"(strike {ctx['connection_strikes']}/{FETCH_FAILURE_THRESHOLD})"
                                     )
                                     ctx["paused_until"] = now_t + pause_sec
-                                    await self._sync_db(pipeline, task_id, batch_id)
+                                    await self._sync_db(pipeline, task_id, batch_id, page=p, new_count=ctx["yield_new"])
                                     continue
                                 logger.error(
                                     f"{d_name}: 网络失败次数过多 → 跳过"
                                 )
                                 ctx["completed"] = True
                                 active_count -= 1
+                                await self._sync_db(pipeline, task_id, batch_id, page=p, new_count=ctx["yield_new"])
                                 await pipeline.finish_crawl_task(
                                     task_id, "failed",
                                     error_message=f"网络失败 {ctx['connection_strikes']} 次"
@@ -247,12 +250,13 @@ class CrawlEngine:
                                     )
                                     ctx["completed"] = True
                                     active_count -= 1
+                                    await self._sync_db(pipeline, task_id, batch_id, page=p, new_count=ctx["yield_new"])
                                     await pipeline.finish_crawl_task(
                                         task_id, "failed",
                                         error_message=f"验证码 {ctx['captcha_strikes']} 次"
                                     )
                                     # 触发上下文轮换
-                                    logger.info("🔄 触发紧急上下文轮换（验证码风暴）")
+                                    logger.info("[Rotate] 触发紧急上下文轮换（验证码风暴）")
                                     await pf.rotate_context()
                                     continue
                                 pause = 30 * ctx["captcha_strikes"]
@@ -271,6 +275,11 @@ class CrawlEngine:
                                     continue
                                 ctx["completed"] = True
                                 active_count -= 1
+                                await self._sync_db(pipeline, task_id, batch_id, page=p, new_count=ctx["yield_new"])
+                                await pipeline.finish_crawl_task(
+                                    task_id, "failed",
+                                    error_message=f"连续 {ctx['connection_strikes']} 次 HTML 过短"
+                                )
                                 continue
 
                             # ── process ──
@@ -289,15 +298,30 @@ class CrawlEngine:
                             if p == 1:
                                 if raw_count == 0:
                                     # 第 1 页就无数据 → 大概率 fang_code 失效或区县无房源
+                                    # 从 HTML 提取诊断信息帮助排查
+                                    diag_parts = [f"fang_code={d_code}"]
+                                    if html:
+                                        dl_tags = html.count('<dl')
+                                        data_bg = html.count('data-bg')
+                                        chushou = html.count('/chushou/')
+                                        diag_parts.append(
+                                            f"html={len(html)}bytes dl={dl_tags} "
+                                            f"data-bg={data_bg} /chushou/={chushou}"
+                                        )
+                                    diag = "; ".join(diag_parts)
                                     logger.warning(
                                         f"{d_name}: 第 1 页无数据 → 立即跳过 "
-                                        f"(可能 fang_code={d_code} 失效或该区县无房源)"
+                                        f"({diag})"
                                     )
                                     ctx["completed"] = True
                                     active_count -= 1
+                                    await self._sync_db(
+                                        pipeline, task_id, batch_id,
+                                        page=1, new_count=ctx["yield_new"],
+                                    )
                                     await pipeline.finish_crawl_task(
                                         task_id, "completed",
-                                        error_message="第 1 页无房源数据"
+                                        error_message=f"第 1 页无房源数据 ({diag})",
                                     )
                                     continue
 
@@ -311,7 +335,8 @@ class CrawlEngine:
                                     )
 
                             # ── DRY 检测（页面完全无房源数据）──
-                            if raw_count == 0:
+                            # no_early_stop 模式下跳过: 用户要逐页全量爬取
+                            if not no_early_stop and raw_count == 0:
                                 ctx["dry"] += 1
                                 ctx["zero_yield"] += 1
                                 if ctx["dry"] >= DRY_PAGE_THRESHOLD:
@@ -320,62 +345,64 @@ class CrawlEngine:
                                     )
                                     ctx["completed"] = True
                                     active_count -= 1
-                                    await self._sync_db(pipeline, task_id, batch_id)
+                                    await self._sync_db(pipeline, task_id, batch_id, page=p, new_count=ctx["yield_new"])
                                     await pipeline.finish_crawl_task(task_id, "completed")
                                     continue
                             else:
                                 ctx["dry"] = 0
 
                             # ── 零产出检测（有数据但全已入库，无新增/更新）──
-                            if raw_count > 0 and new_n == 0 and updated_n == 0:
-                                ctx["zero_yield"] += 1
+                            # no_early_stop 模式下完全跳过：用户要逐页全量爬取
+                            if not no_early_stop:
+                                if raw_count > 0 and new_n == 0 and updated_n == 0:
+                                    ctx["zero_yield"] += 1
 
-                                # 阶段 A: 触发跳页（可能踩到历史已爬页面）
-                                if (
-                                    ctx["zero_yield"] >= LOW_YIELD_JUMP_THRESHOLD
-                                    and ctx["zero_yield"] < ZERO_YIELD_THRESHOLD
-                                    and ctx["jumps"] < MAX_JUMPS_PER_DISTRICT
-                                ):
-                                    skip_to = min(
-                                        ctx["page"] + JUMP_PAGES,
-                                        ctx["district_max"] + 1,
-                                    )
-                                    if skip_to > ctx["page"]:
-                                        logger.info(
-                                            f"  ⏭ {d_name}: 连续 {ctx['zero_yield']} 页零产出 → "
-                                            f"跳页 page {ctx['page']} → {skip_to} "
-                                            f"(第 {ctx['jumps']+1}/{MAX_JUMPS_PER_DISTRICT} 次跳页)"
+                                    # 阶段 A: 触发跳页（可能踩到历史已爬页面）
+                                    if (
+                                        ctx["zero_yield"] >= LOW_YIELD_JUMP_THRESHOLD
+                                        and ctx["zero_yield"] < ZERO_YIELD_THRESHOLD
+                                        and ctx["jumps"] < MAX_JUMPS_PER_DISTRICT
+                                    ):
+                                        skip_to = min(
+                                            ctx["page"] + JUMP_PAGES,
+                                            ctx["district_max"] + 1,
                                         )
-                                        ctx["page"] = skip_to
-                                        ctx["zero_yield"] = 0
-                                        ctx["jumps"] += 1
-                                        continue  # 跳到新区间第一页，不执行末尾 page+=1
+                                        if skip_to > ctx["page"]:
+                                            logger.info(
+                                                f"  [Jump] {d_name}: 连续 {ctx['zero_yield']} 页零产出 → "
+                                                f"跳页 page {ctx['page']} → {skip_to} "
+                                                f"(第 {ctx['jumps']+1}/{MAX_JUMPS_PER_DISTRICT} 次跳页)"
+                                            )
+                                            ctx["page"] = skip_to
+                                            ctx["zero_yield"] = 0
+                                            ctx["jumps"] += 1
+                                            continue
 
-                                # 阶段 B: 跳页次数耗尽或超过阈值 → 停止
-                                if ctx["zero_yield"] >= ZERO_YIELD_THRESHOLD:
-                                    reason = (
-                                        f"连续 {ZERO_YIELD_THRESHOLD} 页零产出"
-                                        if ctx["jumps"] >= MAX_JUMPS_PER_DISTRICT
-                                        else f"连续 {ctx['zero_yield']} 页零产出"
-                                    )
-                                    logger.info(
-                                        f"{d_name} page {p}: {reason}"
-                                        f"（{ctx['total_raw']} 条原始数据, "
-                                        f"跳页 {ctx['jumps']} 次）→ 完成"
-                                    )
-                                    ctx["completed"] = True
-                                    active_count -= 1
-                                    await self._sync_db(pipeline, task_id, batch_id)
-                                    await pipeline.finish_crawl_task(task_id, "completed")
-                                    continue
-                            else:
-                                # 有新增或更新 → 归零
-                                if new_n > 0 or updated_n > 0:
-                                    ctx["zero_yield"] = 0
+                                    # 阶段 B: 跳页次数耗尽或超过阈值 → 停止
+                                    if ctx["zero_yield"] >= ZERO_YIELD_THRESHOLD:
+                                        reason = (
+                                            f"连续 {ZERO_YIELD_THRESHOLD} 页零产出"
+                                            if ctx["jumps"] >= MAX_JUMPS_PER_DISTRICT
+                                            else f"连续 {ctx['zero_yield']} 页零产出"
+                                        )
+                                        logger.info(
+                                            f"{d_name} page {p}: {reason}"
+                                            f"（{ctx['total_raw']} 条原始数据, "
+                                            f"跳页 {ctx['jumps']} 次）→ 完成"
+                                        )
+                                        ctx["completed"] = True
+                                        active_count -= 1
+                                        await self._sync_db(pipeline, task_id, batch_id, page=p, new_count=ctx["yield_new"])
+                                        await pipeline.finish_crawl_task(task_id, "completed")
+                                        continue
+                                else:
+                                    # 有新增或更新 → 归零
+                                    if new_n > 0 or updated_n > 0:
+                                        ctx["zero_yield"] = 0
 
                             # ── 定期 DB 同步 ──
                             if p % DB_SYNC_INTERVAL == 0:
-                                await self._sync_db(pipeline, task_id, batch_id)
+                                await self._sync_db(pipeline, task_id, batch_id, page=p, new_count=ctx["yield_new"])
 
                             ctx["page"] += 1
 
@@ -384,10 +411,10 @@ class CrawlEngine:
                                 yield_total = ctx["yield_new"] + ctx["yield_updated"]
                                 ctx["completed"] = True
                                 active_count -= 1
-                                await self._sync_db(pipeline, task_id, batch_id)
+                                await self._sync_db(pipeline, task_id, batch_id, page=p, new_count=ctx["yield_new"])
                                 await pipeline.finish_crawl_task(task_id, "completed")
                                 logger.info(
-                                    f"✅ {d_name}: 完成 "
+                                    f"[OK] {d_name}: 完成 "
                                     f"({ctx['page']-1} 页, "
                                     f"新增 {ctx['yield_new']}, "
                                     f"更新 {ctx['yield_updated']}, "
@@ -458,7 +485,7 @@ class CrawlEngine:
                     if ctx["yield_new"] + ctx["yield_updated"] > 0
                 )
                 logger.info(
-                    f"📊 爬取汇总: {total_yield} 条产出 "
+                    f"[Summary] 爬取汇总: {total_yield} 条产出 "
                     f"({self._new_count} 新 / {self._updated_count} 更新 / "
                     f"{self._unchanged_count} 不变), "
                     f"{productive}/{total_districts} 区县有产出, "
@@ -482,12 +509,13 @@ class CrawlEngine:
             "errors": self._error_count,
         }
 
-    async def _sync_db(self, pipeline, task_id, batch_id):
+    async def _sync_db(self, pipeline, task_id, batch_id, page=None, new_count=None):
         try:
+            page_val = page if page is not None else self._current_page
             await pipeline.update_crawl_task(
                 task_id,
-                page_end=self._current_page,
-                listings_found=self._new_count,
+                page_end=page_val,
+                listings_found=new_count if new_count is not None else self._new_count,
             )
             await pipeline.update_crawl_batch(
                 batch_id,
@@ -567,8 +595,10 @@ class CrawlEngine:
             elif action == "updated":
                 self._updated_count += 1
                 page_updated += 1
-            elif action == "skip":
+            elif action == "unchanged":
                 self._unchanged_count += 1
+            else:  # "skip" — 入库异常或缺少 house_id
+                self._unchanged_count += 1  # 也算未变更（未成功入库）
 
         await pipeline.flush()
         return page_new, page_updated, raw_count

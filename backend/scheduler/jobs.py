@@ -102,14 +102,16 @@ async def run_weekly_incremental_crawl():
 
             result = await engine.crawl_all(
                 batch_type="incremental",
-                max_pages=2,
+                max_pages=100,
+                no_early_stop=True,
                 pre_created_batch_id=resume.id,
             )
         else:
             logger.info("[Scheduler] 创建新的增量批次")
             result = await engine.crawl_all(
                 batch_type="incremental",
-                max_pages=2,
+                max_pages=100,
+                no_early_stop=True,
             )
 
         logger.info(
@@ -157,12 +159,28 @@ async def run_daily_listing_age_update():
 
 
 async def resume_incomplete_batches():
-    """启动时恢复所有未完成的爬取任务（状态为 running 的标记为 failed）。
+    """启动时恢复所有未完成的爬取任务（状态为 running 的标记为 stopped）。
 
-    这确保进程重启后，被中断的 batch 不会永久卡在 running 状态。
+    这确保进程重启后，被中断的 batch/task 不会永久卡在 running 状态。
     """
     logger.info("[Scheduler] 检查未完成的爬取批次...")
     async with async_session() as db:
+        # 1. 修复所有 running 状态的 tasks
+        task_result = await db.execute(
+            select(CrawlTask).where(CrawlTask.status == "running")
+        )
+        stuck_tasks = task_result.scalars().all()
+        if stuck_tasks:
+            logger.warning(
+                f"[Scheduler] 标记 {len(stuck_tasks)} 个未完成 task 为 stopped"
+            )
+            await db.execute(
+                update(CrawlTask)
+                .where(CrawlTask.status == "running")
+                .values(status="stopped", finished_at=datetime.now())
+            )
+
+        # 2. 修复所有 running 状态的 batches
         result = await db.execute(
             select(CrawlBatch).where(CrawlBatch.status == "running")
         )

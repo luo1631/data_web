@@ -56,6 +56,7 @@ async def start_crawl(
                 batch_type="full",
                 max_pages=request.max_pages_per_district,
                 pre_created_batch_id=batch_id,
+                no_early_stop=request.no_early_stop,
             )
             logger.info(f"Crawl #{batch_id} done: {result}")
         except asyncio.CancelledError:

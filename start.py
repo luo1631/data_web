@@ -34,7 +34,7 @@ else:
 
 print("\n[3/3] Starting services...")
 be = subprocess.Popen(
-    [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000"],
+    [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8001"],
     cwd=BACKEND, creationflags=subprocess.CREATE_NEW_CONSOLE
 )
 fe = subprocess.Popen(
@@ -45,7 +45,7 @@ time.sleep(3)
 
 print("\n============================================")
 print("  Frontend : http://localhost:5173")
-print("  Swagger  : http://localhost:8000/docs")
+print("  Swagger  : http://localhost:8001/docs")
 print("============================================")
 print("\nPress Ctrl+C to stop all services...")
 

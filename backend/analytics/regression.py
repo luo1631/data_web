@@ -3,8 +3,11 @@
 
 定位: "影响房价的关键因素排序"，非精准估值工具。
 因为缺少学区、地铁距离、楼层系数等变量，R² 通常 < 0.6。
+
+性能: 模块级缓存（10 分钟 TTL），同参数请求直接命中。
 """
 
+import time
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
@@ -17,6 +20,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.listing import Listing
+
+# ── 模块级缓存 ──
+_CACHE: dict = {}
+_CACHE_TTL = 600  # 10 分钟
 
 # 用于回归的特征列表
 NUMERIC_FEATURES = ["area", "total_floors", "listing_age_days"]
@@ -34,8 +41,13 @@ async def analyze_feature_importance(
 
     Returns:
         {feature_importance: [{feature, importance, pct}], r2_score, sample_size, limitations: [...]}
-    无数据时返回空结果。
+    无数据时返回空结果。结果缓存 10 分钟。
     """
+    cache_key = f"{district_id}_{include_court_auction}"
+    now = time.time()
+    cached = _CACHE.get(cache_key)
+    if cached and now - cached["ts"] < _CACHE_TTL:
+        return cached["data"]
     # 查询数据
     stmt = select(
         Listing.unit_price,
@@ -150,9 +162,11 @@ async def analyze_feature_importance(
         "类别特征在 one-hot 编码后权重被稀释，排序偏向连续变量（面积等），仅作参考",
     ]
 
-    return {
+    data = {
         "feature_importance": imp_list,
         "r2_score": r2,
         "sample_size": len(df),
         "limitations": limitations,
     }
+    _CACHE[cache_key] = {"ts": now, "data": data}
+    return data

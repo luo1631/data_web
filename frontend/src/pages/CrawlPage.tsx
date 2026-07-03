@@ -11,10 +11,11 @@ import type { CrawlBatch } from "../types/common";
 
 export default function CrawlPage() {
   const lang = useThemeStore((s) => s.lang);
-  const defaultMaxPages = useSettingsStore((s) => s.defaultMaxPages);
+  const storeMaxPages = useSettingsStore((s) => s.defaultMaxPages);
+  const persistMaxPages = useSettingsStore((s) => s.setDefaultMaxPages);
   const crawl = useCrawlProgress();
 
-  const [maxPages, setMaxPages] = useState(defaultMaxPages);
+  const [maxPages, setMaxPages] = useState(storeMaxPages);
   const [batches, setBatches] = useState<CrawlBatch[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const loaded = useRef(false);
@@ -74,10 +75,10 @@ export default function CrawlPage() {
             max={200}
             step={5}
             value={maxPages}
-            onChange={(e) => setMaxPages(Number(e.target.value))}
+            onChange={(e) => { const n = Number(e.target.value); setMaxPages(n); persistMaxPages(n); }}
           />
           <span className="text-xs text-[var(--color-text-secondary)] self-end pb-1">
-            {t("crawl.estimatedTime", lang, { n: Math.ceil(maxPages * 5 / 60) })}
+            {t("crawl.estimatedTime", lang, { n: Math.ceil(37 * maxPages * 6 / 60) })}
           </span>
           <div className="ml-auto flex gap-2 self-end">
             {isRunning ? (

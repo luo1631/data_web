@@ -33,65 +33,35 @@ DEFAULT_DAYS = 60
 async def compute_and_cache() -> None:
     """执行数据库查询 + 趋势计算 + 写入全局缓存。
 
-    此函数在异步事件循环中运行（由 APScheduler 调度）。
+    策略（总体市场均价日级时间序列）:
+      每天的值 = 当日市场中所有活跃房源的均价，通过以下方式重建：
+        1. 加载所有活跃房源（当前单价 + first_seen_at）
+        2. 加载所有 price_history 记录
+        3. 对每个日期，确定每套房源在当日的价格：
+           - first_seen_at 晚于该日期 → 还没挂牌，跳过
+           - 否则取 price_history 中 ≤ 该日期的最新记录
+           - 无 history 记录 → 用当前单价
+        4. 逐日计算全体均价
     """
     from app.models.listing import Listing
     from app.models.price_history import PriceHistory
 
-    logger.info("[Trends] 开始计算价格趋势快照...")
+    logger.info("[Trends] 开始计算价格趋势快照（全体活跃房源均价）...")
 
     try:
         async with async_session() as db:
-            cutoff = date.today() - timedelta(days=DEFAULT_DAYS)
-
-            # 优先 price_history
-            ph_result = await db.execute(
+            # ── 1. 所有活跃房源当前价格 + 首见日 ──
+            listings_result = await db.execute(
                 select(
-                    func.strftime("%Y-%m-%d", PriceHistory.record_date).label("date"),
-                    func.avg(PriceHistory.unit_price).label("avg_price"),
-                    func.count().label("cnt"),
-                ).select_from(PriceHistory).join(
-                    Listing, PriceHistory.listing_id == Listing.id
+                    Listing.id, Listing.unit_price, Listing.first_seen_at,
                 ).where(
                     Listing.status == "active",
-                    PriceHistory.record_date >= cutoff,
-                ).group_by("date").order_by("date")
+                    Listing.unit_price > 0,
+                    Listing.first_seen_at.isnot(None),
+                )
             )
-            rows = ph_result.all()
-            source = "price_history"
-
-            if not rows:
-                # 回退 1: listing_date（详情页解析填充，当前批量爬虫仅采集列表页故多为空）
-                l_result = await db.execute(
-                    select(
-                        func.strftime("%Y-%m-%d", Listing.listing_date).label("date"),
-                        func.avg(Listing.unit_price).label("avg_price"),
-                        func.count().label("cnt"),
-                    ).where(
-                        Listing.status == "active",
-                        Listing.listing_date.isnot(None),
-                        Listing.unit_price > 0,
-                    ).group_by("date").order_by("date")
-                )
-                rows = l_result.all()
-                source = "listing_date"
-
-            if not rows:
-                # 回退 2: first_seen_at（爬虫首次入库时自动填充，保证有数据）
-                fs_result = await db.execute(
-                    select(
-                        func.strftime("%Y-%m-%d", Listing.first_seen_at).label("date"),
-                        func.avg(Listing.unit_price).label("avg_price"),
-                        func.count().label("cnt"),
-                    ).where(
-                        Listing.status == "active",
-                        Listing.unit_price > 0,
-                    ).group_by("date").order_by("date")
-                )
-                rows = fs_result.all()
-                source = "first_seen_at"
-
-            if not rows:
+            listings = listings_result.all()
+            if not listings:
                 with _LOCK:
                     _TREND_CACHE["data"] = {"trends": [], "source": "none", "prediction_date": None, "predicted_price": None}
                     _TREND_CACHE["computed_at"] = datetime.now()
@@ -99,10 +69,77 @@ async def compute_and_cache() -> None:
                 logger.warning("[Trends] 无可用数据，缓存为空")
                 return
 
-            trends = [
-                {"date": d, "avg_unit_price": round(float(a), 2), "count": c}
-                for d, a, c in rows
-            ]
+            # lid → (current_price, first_seen_date_str)
+            lid_current: dict[int, tuple[float, str]] = {}
+            earliest_date = date.today()
+            for lid, up, fsa in listings:
+                ds = fsa.strftime("%Y-%m-%d") if isinstance(fsa, datetime) else str(fsa)[:10]
+                lid_current[lid] = (float(up), ds)
+                d = date.fromisoformat(ds)
+                if d < earliest_date:
+                    earliest_date = d
+            all_lids = set(lid_current.keys())
+
+            # ── 2. 所有 price_history 记录（不限时间，完整历史）──
+            ph_result = await db.execute(
+                select(
+                    PriceHistory.listing_id,
+                    func.strftime("%Y-%m-%d", PriceHistory.record_date).label("date"),
+                    PriceHistory.unit_price,
+                ).where(
+                    PriceHistory.listing_id.in_(all_lids),
+                ).order_by(PriceHistory.listing_id, PriceHistory.record_date)
+            )
+            # lid → sorted list of (date_str, unit_price)
+            ph_map: dict[int, list[tuple[str, float]]] = {}
+            for lid, d, up in ph_result.all():
+                ph_map.setdefault(lid, []).append((d, float(up)))
+
+            # ── 3. 构建日期序列 —— 从最早首见日到今天 ──
+            today = date.today()
+            day_count = (today - earliest_date).days + 1
+            if day_count > 365:
+                # 超过一年时按周聚合，太长的日级无意义
+                step = 7
+            elif day_count > 180:
+                step = 3
+            else:
+                step = 1
+
+            date_list: list[date] = []
+            d = earliest_date
+            while d <= today:
+                date_list.append(d)
+                d += timedelta(days=step)
+
+            # ── 4. 逐日重建全体均价 ──
+            trends = []
+            ph_by_lid_sorted = {lid: sorted(recs, key=lambda x: x[0]) for lid, recs in ph_map.items()}
+
+            for dt in date_list:
+                dt_str = dt.isoformat()
+                total_price = 0.0
+                count = 0
+                for lid, (cur_price, first_str) in lid_current.items():
+                    if first_str > dt_str:
+                        continue  # 还没挂牌
+                    # 找 price_history 中 ≤ dt 的最新记录
+                    price = cur_price
+                    if lid in ph_by_lid_sorted:
+                        for ph_date, ph_price in ph_by_lid_sorted[lid]:
+                            if ph_date > dt_str:
+                                break
+                            price = ph_price
+                    total_price += price
+                    count += 1
+                if count > 0:
+                    trends.append({
+                        "date": dt_str,
+                        "avg_unit_price": round(total_price / count, 2),
+                        "count": count,
+                    })
+
+            source = "reconstructed_market_avg"
 
         # 计算衍生指标（SMA-7 + 预测）
         result = _add_derived(trends, source)
